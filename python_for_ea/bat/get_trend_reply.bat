@@ -1,8 +1,11 @@
 @echo off
 setlocal
 
-set APP_DIR=C:\ea_py
+chcp 65001 >nul
+set PYTHONIOENCODING=utf-8
+set "APP_DIR=%~dp0.."
 set PY_FILE=get_trend_reply.py
+for %%I in ("%APP_DIR%") do set "APP_DIR=%%~fI"
 
 cd /d "%APP_DIR%"
 

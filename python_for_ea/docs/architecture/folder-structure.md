@@ -2,7 +2,7 @@
 
 ## 目的
 
-このドキュメントは、`C:\ea_py` のフォルダ構成に関する正本である。
+このドキュメントは、MT5データフォルダ配下の `MQL5\python_for_ea` のフォルダ構成に関する正本である。
 
 現在のプロジェクトは、MT5 HIT-EAから出力されたOHLC CSVをPythonで解析し、OpenAI APIを使ってGOLD/XAUUSD向けの相場環境とエントリー候補価格を返す補助アプリケーションである。
 
@@ -11,7 +11,7 @@ MT5 EAから `bat/` 経由でルート直下のPythonスクリプトが呼ばれ
 ## 現在のフォルダ構成
 
 ```text
-C:/ea_py/
+<TerminalDataPath>/MQL5/python_for_ea/
 ├─ AGENTS.md
 ├─ README.md
 ├─ pyproject.toml
@@ -105,7 +105,7 @@ C:/Users/new/AppData/Roaming/MetaQuotes/Terminal/{terminal_ID}/MQL5/Files/
 └─ tmp_chart_long.png
 ```
 
-これらは実行時生成物であり、原則として `C:\ea_py` 配下へコピーして正本化しない。
+これらは実行時生成物であり、原則として `MQL5\python_for_ea` 配下へコピーして正本化しない。
 
 ## MQL5 EAファイル
 
@@ -127,7 +127,7 @@ EAファイルはこのPythonプロジェクトの外部連携先として扱う
 ルート直下の `get_trend_reply.py` と `get_entry_reply.py` は、MT5/bat互換のため薄いエントリーポイントとして残す。
 
 ```text
-C:/ea_py/
+<TerminalDataPath>/MQL5/python_for_ea/
 ├─ AGENTS.md
 ├─ README.md
 ├─ pyproject.toml

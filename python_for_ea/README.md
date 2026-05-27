@@ -9,7 +9,7 @@ Python 側は注文送信を行いません。発注、注文管理、M15 確定
 MT5 EA からは `bat/` 経由でルート直下の互換スクリプトを起動します。
 
 ```text
-C:/ea_py/
+<TerminalDataPath>/MQL5/python_for_ea/
 ├─ get_trend_reply.py
 ├─ get_entry_reply.py
 ├─ bat/
@@ -21,20 +21,20 @@ C:/ea_py/
 
 - `get_trend_reply.py`: `src/ea_py/pipelines/trend_pipeline.py` を起動する薄い入口。
 - `get_entry_reply.py`: `src/ea_py/pipelines/entry_pipeline.py` を起動する薄い入口。
-- `bat/get_trend_reply.bat`: `uv run python C:\ea_py\get_trend_reply.py` を実行。
-- `bat/get_entry_reply.bat`: `uv run python C:\ea_py\get_entry_reply.py` を実行。
+- `bat/get_trend_reply.bat`: bat自身の親フォルダをプロジェクトルートとして `uv run python get_trend_reply.py` を実行。
+- `bat/get_entry_reply.bat`: bat自身の親フォルダをプロジェクトルートとして `uv run python get_entry_reply.py` を実行。
 
 入口ファイル名や配置を変える場合は、`bat/` と MQL5 EA 側の呼び出し設定も合わせて更新してください。
 
 ## MT5 連携ファイル
 
-既定の連携先は次の MT5 `MQL5/Files` ディレクトリです。
+既定の連携先は、このプロジェクトの親にある MT5 `MQL5/Files` ディレクトリです。
 
 ```text
-C:/Users/new/AppData/Roaming/MetaQuotes/Terminal/5BDB0B60344C088C2FA5CA35699BAAFD/MQL5/Files/
+<TerminalDataPath>/MQL5/Files/
 ```
 
-パスの組み立ては `src/ea_py/paths.py` で定義しています。
+パスの組み立ては `src/ea_py/paths.py` で定義しています。特殊な配置では `MT5_FILES_DIR` または `MT5_DATA_PATH` 環境変数で上書きできます。
 
 ### 入力
 
@@ -174,14 +174,14 @@ uv sync
 個別実行:
 
 ```powershell
-uv run python C:/ea_py/get_trend_reply.py
-uv run python C:/ea_py/get_entry_reply.py
+uv run python get_trend_reply.py
+uv run python get_entry_reply.py
 ```
 
 品質チェック:
 
 ```powershell
-uv run python -m py_compile C:/ea_py/get_trend_reply.py C:/ea_py/get_entry_reply.py
+uv run python -m py_compile get_trend_reply.py get_entry_reply.py
 uv run ruff check .
 uv run ty check
 uv run pytest

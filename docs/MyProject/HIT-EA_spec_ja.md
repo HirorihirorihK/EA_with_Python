@@ -93,7 +93,7 @@
 - Python出力: `trend_state.txt`
 - 完了フラグ: `process_done_trend.txt`
 - 実行中フラグ: `process_running_trend.txt`
-- 起動バッチ: `C:\ea_py\bat\get_trend_reply.bat`
+- 起動バッチ: `<TerminalDataPath>\MQL5\python_for_ea\bat\get_trend_reply.bat`
 
 ### H1エントリー価格生成
 
@@ -101,7 +101,9 @@
 - Python出力: `target_prices.txt`, `target_zones.txt`
 - 完了フラグ: `process_done_entry.txt`
 - 実行中フラグ: `process_running_entry.txt`
-- 起動バッチ: `C:\ea_py\bat\get_entry_reply.bat`
+- 起動バッチ: `<TerminalDataPath>\MQL5\python_for_ea\bat\get_entry_reply.bat`
+
+EAは `OnInit()` で `TerminalInfoString(TERMINAL_DATA_PATH)` から `MQL5\python_for_ea` を解決し、各batファイルの絶対パスを組み立てる。batファイルは自身の位置からPythonプロジェクトルートを解決するため、`C:\ea_py` には依存しない。
 
 `target_prices.txt` は13行構成とする。
 
@@ -199,6 +201,12 @@ Pythonは `target_prices.txt` と `target_zones.txt` の両方を書き終えて
 - `running` ファイルだけが残っている場合は、PIDからプロセス復元を試みる。復元できずタイムアウト済みなら古いマーカーとして削除する。
 
 ## 10. 変更履歴
+
+### 2026-05-27
+
+- Python補助アプリの配置を `C:\ea_py` からMT5データフォルダ配下の `MQL5\python_for_ea` へ移行する仕様に変更した。
+- EA側は `TerminalInfoString(TERMINAL_DATA_PATH)` からbatパスを組み立て、外部プロセスの作業ディレクトリはbatファイルの配置から導出するようにした。
+- Python側は `MQL5\python_for_ea` の親にある `MQL5\Files` を既定の連携先として自動検出し、必要に応じて `MT5_FILES_DIR` または `MT5_DATA_PATH` で上書きできる仕様にした。
 
 ### 2026-05-24
 

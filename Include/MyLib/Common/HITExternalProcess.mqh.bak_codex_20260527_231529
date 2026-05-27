@@ -259,55 +259,6 @@ bool IsExternalProcessTimedOut(ExternalProcessState &process, const string runni
 //+------------------------------------------------------------------+
 //| バッチファイルをプロセスハンドル付きで起動する関数
 //+------------------------------------------------------------------+
-/**
- * @brief パス内の最後のディレクトリ区切り文字位置を返します。
- */
-int LastPathSeparatorIndex(const string path)
-  {
-   for(int i = StringLen(path) - 1; i >= 0; i--)
-     {
-      int ch = StringGetCharacter(path, i);
-      if(ch == 92 || ch == 47) // backslash or slash
-         return i;
-     }
-
-   return -1;
-  }
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-/**
- * @brief ファイルパスから親ディレクトリを返します。
- */
-string ParentDirectory(const string path)
-  {
-   int index = LastPathSeparatorIndex(path);
-   if(index <= 0)
-      return "";
-
-   return StringSubstr(path, 0, index);
-  }
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-/**
- * @brief batファイルの位置からPythonアプリの作業ディレクトリを返します。
- */
-string BatchWorkingDirectory(const string bat_file)
-  {
-   string bat_dir = ParentDirectory(bat_file);
-   int length = StringLen(bat_dir);
-   if(length >= 4 && StringSubstr(bat_dir, length - 4) == "\\bat")
-      return StringSubstr(bat_dir, 0, length - 4);
-
-   return bat_dir;
-  }
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
 bool StartBatchProcess(const string bat_file, const string running_file, const string label, ExternalProcessState &process)
   {
    STARTUPINFO_W startup_info = {};
@@ -317,7 +268,6 @@ bool StartBatchProcess(const string bat_file, const string running_file, const s
 
    string cmd_exe = "C:\\Windows\\System32\\cmd.exe";
    string command_line = "\"" + cmd_exe + "\" /c \"\"" + bat_file + "\"\"";
-   string current_directory = BatchWorkingDirectory(bat_file);
 
    int created = CreateProcessW(
                     cmd_exe,
@@ -327,15 +277,14 @@ bool StartBatchProcess(const string bat_file, const string running_file, const s
                     0,
                     CREATE_NO_WINDOW,
                     0,
-                    current_directory,
+                    "C:\\ea_py",
                     startup_info,
                     process_info
                  );
 
    if(created == 0 || process_info.hProcess == 0)
      {
-      Print("[", label, "] CreateProcessW failed. file=", bat_file,
-            " cwd=", current_directory, " err=", GetLastError());
+      Print("[", label, "] CreateProcessW failed. file=", bat_file, " err=", GetLastError());
       ResetExternalProcessState(process);
       DeleteRunningFile(running_file);
       return false;
@@ -352,8 +301,7 @@ bool StartBatchProcess(const string bat_file, const string running_file, const s
    process.started_at      = TimeCurrent();
 
    CreateRunningFile(running_file, process.process_id);
-   Print("[", label, "] process started. pid=", process.process_id,
-         " file=", bat_file, " cwd=", current_directory);
+   Print("[", label, "] process started. pid=", process.process_id, " file=", bat_file);
    return true;
   }
 

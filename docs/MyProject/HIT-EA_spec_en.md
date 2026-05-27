@@ -85,7 +85,7 @@
 - Python output: `trend_state.txt`
 - Done marker: `process_done_trend.txt`
 - Running marker: `process_running_trend.txt`
-- Batch file: `C:\ea_py\bat\get_trend_reply.bat`
+- Batch file: `<TerminalDataPath>\MQL5\python_for_ea\bat\get_trend_reply.bat`
 
 ### H1 Entry Candidate Generation
 
@@ -93,7 +93,9 @@
 - Python output: `target_prices.txt`
 - Done marker: `process_done_entry.txt`
 - Running marker: `process_running_entry.txt`
-- Batch file: `C:\ea_py\bat\get_entry_reply.bat`
+- Batch file: `<TerminalDataPath>\MQL5\python_for_ea\bat\get_entry_reply.bat`
+
+During `OnInit()`, the EA resolves `MQL5\python_for_ea` from `TerminalInfoString(TERMINAL_DATA_PATH)` and builds absolute batch-file paths. Each batch file resolves the Python project root from its own location, so runtime execution no longer depends on `C:\ea_py`.
 
 `target_prices.txt` must contain 13 lines:
 
@@ -174,6 +176,12 @@ New entries are allowed only when all conditions below are satisfied:
 - If only a stale running marker remains, the EA attempts PID recovery. If recovery fails and the marker is timed out, it removes the stale marker.
 
 ## 10. Changelog
+
+### 2026-05-27
+
+- Moved the Python helper application specification from `C:\ea_py` to `MQL5\python_for_ea` under the MT5 data folder.
+- Updated the EA startup path model so batch paths are built from `TerminalInfoString(TERMINAL_DATA_PATH)`, and the external process working directory is derived from the batch-file location.
+- Updated Python path discovery so the default MT5 linkage is the adjacent `MQL5\Files` directory, with `MT5_FILES_DIR` or `MT5_DATA_PATH` available for explicit overrides.
 
 ### 2026-05-13
 

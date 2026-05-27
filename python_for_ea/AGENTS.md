@@ -2,7 +2,7 @@
 
 ## 位置づけ
 
-- このファイルは、`C:\ea_py` プロジェクトで作業するAIエージェント共通の正本とする。
+- このファイルは、MT5データフォルダ配下の `MQL5\python_for_ea` プロジェクトで作業するAIエージェント共通の正本とする。
 - GitHub Copilot 固有の動作指示は、必要になった時点で `.github/copilot-instructions.md` に分離する。
 - ファイル種別・技術領域ごとの詳細指示は、必要に応じて `.github/instructions/`、`.cursor/rules/`、`.agents/skills/` に分離する。
 - 長文ルールを複数ファイルへ重複記載しない。共通ルールはこのファイルを優先する。
@@ -101,7 +101,7 @@
 - 変更後は、影響範囲に応じて以下を確認する。
 
 ```bash
-uv run python -m py_compile C:/ea_py/get_trend_reply.py C:/ea_py/get_entry_reply.py
+uv run python -m py_compile get_trend_reply.py get_entry_reply.py
 uv run ruff check .
 uv run ty check
 uv run pytest

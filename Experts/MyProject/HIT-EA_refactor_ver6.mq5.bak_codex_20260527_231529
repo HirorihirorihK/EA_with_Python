@@ -61,11 +61,8 @@ long OpenProcess(uint dwDesiredAccess, int bInheritHandle, uint dwProcessId);
 #import
 
 // バッチファイルのパス
-// Python helper scripts are managed under this MT5 data folder:
-// <TerminalDataPath>\MQL5\python_for_ea
-string python_app_dir      = "";
-string get_trend_reply_bat = ""; // H4: trend
-string get_entry_reply_bat = ""; // H1: entry
+string get_trend_reply_bat = "C:\\ea_py\\bat\\get_trend_reply.bat"; // H4: trend
+string get_entry_reply_bat = "C:\\ea_py\\bat\\get_entry_reply.bat"; // H1: entry
 
 // プロセス完了ファイルの設定
 string done_trend_file = "process_done_trend.txt";
@@ -232,54 +229,6 @@ bool g_sltp_panel_created = false;
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
-//| Python連携パスをMT5データフォルダから組み立てる関数
-//+------------------------------------------------------------------+
-/**
- * @brief MT5データフォルダ配下のMQL5ルートを返します。
- */
-string MQL5RootPath()
-  {
-   return TerminalInfoString(TERMINAL_DATA_PATH) + "\\MQL5";
-  }
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-/**
- * @brief EAと同じMQL5ツリー内にあるPython補助アプリのルートを返します。
- */
-string PythonAppDir()
-  {
-   return MQL5RootPath() + "\\python_for_ea";
-  }
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-/**
- * @brief Python補助アプリ配下のbatファイル絶対パスを返します。
- */
-string PythonBatchPath(const string filename)
-  {
-   return PythonAppDir() + "\\bat\\" + filename;
-  }
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-/**
- * @brief Python連携で使用するbatパスを初期化します。
- */
-void ConfigurePythonGatewayPaths()
-  {
-   python_app_dir      = PythonAppDir();
-   get_trend_reply_bat = PythonBatchPath("get_trend_reply.bat");
-   get_entry_reply_bat = PythonBatchPath("get_entry_reply.bat");
-
-   Print("Python app dir: ", python_app_dir);
-  }
-
-//+------------------------------------------------------------------+
 //| 起動時の処理
 //+------------------------------------------------------------------+
 /**
@@ -292,8 +241,6 @@ void ConfigurePythonGatewayPaths()
 int OnInit()
 // プロセス完了ファイルと実行中ファイルの状態を初期化
   {
-   ConfigurePythonGatewayPaths();
-
    PrepareDoneFileOnInit(done_trend_file, running_trend_file, "trend");
    PrepareDoneFileOnInit(done_entry_file, running_entry_file, "entry");
 
