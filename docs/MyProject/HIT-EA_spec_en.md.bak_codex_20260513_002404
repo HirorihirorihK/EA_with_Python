@@ -1,0 +1,180 @@
+# HIT-EA Specification (English)
+
+## 1. Overview
+
+- This EA sends confirmed H4 OHLC data to an external Python process for market-state analysis and confirmed H1 OHLC data for entry candidate generation.
+- The MQL5 side reads Python output files and places pending orders only after checking the H4 market state, H1 candidate prices, M15 confirmation filter, spread, and broker distance constraints.
+- For backtest reproducibility, OHLC export uses `OHLC_START_SHIFT = 1`, so the forming bar is excluded and only closed bars are passed to Python.
+- For live resilience, the EA tracks external-process running files, process IDs, exit codes, and timeouts to prevent duplicate launches and CSV overwrites.
+
+## 2. Indicators
+
+- No standard or custom indicators are used.
+- OHLC data is retrieved with `CopyRates(_Symbol, timeframe, OHLC_START_SHIFT, HISTORY_BARS, rates)`.
+- M15 entry confirmation uses the latest closed bar, the previous closed bar, average range, candle direction, rejection shape, and distance to the candidate entry price.
+
+## 3. Parameters
+
+### input
+
+- `lot_size = 0.01`: Order volume.
+- `spread_limit = 60`: Maximum allowed spread in points.
+- `magic_number = 10001`: Magic number used to identify this EA's orders and positions.
+- `initial_order = 0`: Enables initial H4/H1 processing on startup when set to `1`.
+- `use_m15_entry_filter = true`: Enables M15 closed-bar entry timing confirmation.
+- `m15_entry_zone_atr_multiplier = 1.50`: Allowed proximity multiplier based on the M15 average range.
+- `input_sltp_manager_enabled = false`: Enables UI-driven existing-position SL management through `CSLTPManager`.
+- `input_sltp_show_panel = true`: Shows the SLTP control panel on the chart.
+- `input_sltp_use_breakeven = false`: Enables normal break-even.
+- `input_sltp_breakeven_trigger_pips = 30.0`: Profit threshold for normal break-even.
+- `input_sltp_breakeven_buffer_pips = 0.0`: Profit-side entry buffer used by normal break-even.
+- `input_sltp_use_elapsed_breakeven = false`: Enables elapsed-time break-even.
+- `input_sltp_elapsed_breakeven_hours = 4.0`: Holding time required before elapsed-time break-even is allowed.
+- `input_sltp_elapsed_breakeven_buffer_pips = 0.0`: Profit-side entry buffer used by elapsed-time break-even.
+- `input_sltp_use_active_trailing = false`: Enables active step trailing.
+- `input_sltp_active_breakeven_pips = 30.0`: Profit threshold that starts active trailing.
+- `input_sltp_active_stop_loss_offset_pips = 5.0`: Initial locked profit offset from entry.
+- `input_sltp_active_step_trigger_pips = 10.0`: Additional profit interval required for each SL step.
+- `input_sltp_active_step_move_pips = 5.0`: SL movement added per completed step.
+- `input_sltp_use_tp_progress_stop = false`: Enables TP-progress-based SL locking.
+- `input_sltp_tp_progress_trigger_percent = 70.0`: TP progress required before the SL lock is applied.
+- `input_sltp_tp_progress_sl_lock_percent = 30.0`: Entry-to-TP distance percentage locked by SL.
+- `input_sltp_use_high_volatility_limit = false`: Enables short-term high-volatility SL tightening.
+
+### Main Constants
+
+- `POSITION_LIMIT = 48`: Maximum number of this EA's pending orders plus positions.
+- `ENTRY_H1_LIMIT = 1`: Pending-order lifetime in H1 bars.
+- `CLOSE_H1_LIMIT = 12`: Position lifetime in H1 bars.
+- `HISTORY_BARS = 72`: Number of OHLC bars exported to Python.
+- `OHLC_START_SHIFT = 1`: Shift used to export closed bars only.
+- `M15_CONFIRM_BARS = 20`: Number of M15 bars used for average-range calculation.
+- `ENTRY_RETRY_SECONDS = 60`: Retry interval for entry checks.
+- `ENTRY_RETRY_LIMIT = 10`: Maximum retry count for one H1 candidate set.
+- `TARGET_SIZE = 13`: Number of numeric values expected in `target_prices.txt`.
+- `PYTHON_TIMEOUT_SECONDS = 600`: External Python wait threshold.
+
+## 4. File Layout
+
+- `Experts/MyProject/HIT-EA_refactor_ver5.mq5`: EA entry point. Keeps `OnInit`, `OnDeinit`, `OnTick`, inputs, global state, and DLL imports.
+- `Include/MyLib/Common/HITRuntimeController.mqh`: Tick flow, H4/H1/M15 update control, status comments, and spread checks.
+- `Include/MyLib/Signals/HITEntrySignal.mqh`: Entry preconditions, order-type price validation, M15 filter, and retry-state updates.
+- `Include/MyLib/Common/HITExternalProcess.mqh`: done/running files, external process handles, PID recovery, exit-code checks, and timeout recovery.
+- `Include/MyLib/Signals/HITPythonSignalGateway.mqh`: OHLC CSV export, Python batch launch, and `trend_state.txt` / `target_prices.txt` loading.
+- `Include/MyLib/Trading/HITTradeManager.mqh`: Order sending, filling policy, pending-order expiration, order/position counting, expired order cancellation, and expired position closing.
+- `Include/MyLib/Trading/SLTPManager.mqh`: Existing-position break-even, elapsed-time break-even, active trailing, TP-progress SL, and high-volatility SL management.
+- `Include/MyLib/Panel/SLTPManagerPanel.mqh`: Chart panel that toggles `CSLTPManager` features, validates numeric inputs, and applies settings to the EA.
+
+## 5. Python Integration Files
+
+### H4 Trend Analysis
+
+- MQL5 output: `ohlc_H4.csv`
+- Python output: `trend_state.txt`
+- Done marker: `process_done_trend.txt`
+- Running marker: `process_running_trend.txt`
+- Batch file: `C:\ea_py\bat\get_trend_reply.bat`
+
+### H1 Entry Candidate Generation
+
+- MQL5 output: `ohlc_H1.csv`
+- Python output: `target_prices.txt`
+- Done marker: `process_done_entry.txt`
+- Running marker: `process_running_entry.txt`
+- Batch file: `C:\ea_py\bat\get_entry_reply.bat`
+
+`target_prices.txt` must contain 13 lines:
+
+```text
+Line 1: res_chk
+Lines 2-4:   T1 Buy Stop entry/tp/sl
+Lines 5-7:   T2 Buy Limit entry/tp/sl
+Lines 8-10:  T3 Sell Stop entry/tp/sl
+Lines 11-13: T4 Sell Limit entry/tp/sl
+```
+
+## 6. Entry Conditions
+
+New entries are allowed only when all conditions below are satisfied:
+
+- Spread is less than or equal to `spread_limit`.
+- H4 trend analysis is complete and `trend_state.txt` can be loaded.
+- H1 entry candidate generation is complete and `target_prices.txt` can be loaded.
+- `res_chk = 1`.
+- The H1 candidate set has not expired under `ENTRY_H1_LIMIT`.
+- The selected order type has valid `entry/tp/sl` values greater than `0.0`.
+- The order type is allowed by the H4 `market_state`.
+- The order-type price relationship and broker minimum distance rules are satisfied.
+- When `use_m15_entry_filter = true`, the M15 closed-bar timing confirmation is satisfied.
+- This EA's pending orders plus positions are below `POSITION_LIMIT`.
+
+### market_state and Allowed Order Types
+
+- `0 MARKET_LOW_VOL_RANGE`: Allows T2 Buy Limit / T4 Sell Limit.
+- `1 MARKET_HIGH_VOL_RANGE`: Allows T2 Buy Limit / T4 Sell Limit.
+- `2 MARKET_LOW_VOL_UP`: Allows T1 Buy Stop / T2 Buy Limit.
+- `3 MARKET_HIGH_VOL_UP`: Allows T1 Buy Stop / T2 Buy Limit.
+- `4 MARKET_LOW_VOL_DOWN`: Allows T3 Sell Stop / T4 Sell Limit.
+- `5 MARKET_HIGH_VOL_DOWN`: Allows T3 Sell Stop / T4 Sell Limit.
+- `6 MARKET_ABNORMAL_VOL_STOP`: Blocks new entries.
+
+### Order-Type Price Rules
+
+- T1 Buy Stop: `Ask < entry`, `tp > entry`, `sl < entry`
+- T2 Buy Limit: `Ask > entry`, `tp > entry`, `sl < entry`
+- T3 Sell Stop: `Bid > entry`, `tp < entry`, `sl > entry`
+- T4 Sell Limit: `Bid < entry`, `tp < entry`, `sl > entry`
+
+## 7. Exit Conditions
+
+- Pending orders are cancelled after `ENTRY_H1_LIMIT * PeriodSeconds(PERIOD_H1)` has elapsed from setup time.
+- Positions are closed after `CLOSE_H1_LIMIT * PeriodSeconds(PERIOD_H1)` has elapsed from entry time.
+- Time-limit handling runs early in `OnTick` and is independent of Python readiness or spread checks.
+- On EA removal, `OnDeinit()` releases external-process state and the SLTP panel, then clears the chart status text with `Comment("")` and `ChartRedraw(0)`.
+- When `input_sltp_manager_enabled` or the panel `Manager` toggle is ON, the EA runs `CSLTPManager::ManagePositions()` and `HighVolatilityLimit()` after time-limit handling. Existing-position SL protection therefore continues while Python results are pending or new entries are skipped.
+- Normal break-even and active trailing are mutually exclusive. The panel turns one mode off when the other is enabled, and `CSLTPManager::ValidateSettings()` also validates the exclusion.
+
+## 7.1 SLTP Control Panel
+
+- The panel is created when `input_sltp_show_panel = true` and appears near the chart's upper-right area.
+- If panel creation fails, the EA logs the failure and continues with the already-applied input-based SLTP settings.
+- The `Manager` button toggles all SLTP management. When OFF, panel values remain stored but `OnTick` does not modify SL values.
+- The `BreakEven`, `Elapsed BE`, `Active Trail`, `TP Progress`, and `High Vol` buttons toggle each `CSLTPManager` feature.
+- Numeric fields are validated when `APPLY` is pressed. Invalid or out-of-range values show a `MessageBox`, are logged, and revert to the previous valid value.
+- Settings are copied into `CSLTPManager` only after `APPLY` succeeds. The EA then calls `ValidateSettings()`; if validation fails, SLTP management is stopped and the reason is logged.
+
+## 8. Risk Management
+
+- Managed orders and positions are limited to matching `_Symbol` and `magic_number`.
+- `POSITION_LIMIT` counts only this EA's orders and positions, not the full account.
+- The EA selects the filling policy from `SYMBOL_FILLING_MODE`, preferring IOC, then FOK, then RETURN.
+- Pending orders receive server-side expiration when the broker supports it.
+- `OrderSend` return values and `MqlTradeResult.retcode` are checked. Failures are logged with `GetLastError()` or the retcode.
+- SLTP management only targets existing positions matching `_Symbol` and `magic_number`, and it preserves each position's current TP.
+- SL changes are sent only when the candidate improves protection relative to the current SL and satisfies broker stop-level and freeze-level constraints.
+
+## 9. Error Handling
+
+- If `trend_state.txt` is missing, unreadable, or outside `0..6`, the EA uses `MARKET_ABNORMAL_VOL_STOP`.
+- If `target_prices.txt` is missing, unreadable, or shorter than 13 lines, the EA uses `res_chk = 0`.
+- If a Python process exits with a non-zero code, the code is logged and the next trigger may retry.
+- If only a stale running marker remains, the EA attempts PID recovery. If recovery fails and the marker is timed out, it removes the stale marker.
+
+## 10. Changelog
+
+### 2026-05-05
+
+- Added `Comment("")` and `ChartRedraw(0)` to `OnDeinit()` so the chart status comment is removed when the EA is deleted.
+- Connected `CSLTPManager` and the dedicated chart panel `SLTPManagerPanel.mqh` to `HIT-EA_refactor_ver5.mq5`, allowing UI control of break-even, elapsed-time break-even, active trailing, TP-progress SL, and high-volatility SL tightening.
+- Added SLTP management immediately after time-limit handling in `OnTick`, so existing-position protection continues independently of Python readiness and spread checks.
+- Added SLTP panel inputs, mutual exclusion for normal break-even versus active trailing, and numeric validation on `APPLY`.
+- Split the function implementations from `HIT-EA_refactor_ver5.mq5` into purpose-specific `.mqh` files.
+- Kept `OnInit`, `OnDeinit`, `OnTick`, inputs, and global state in the EA source while moving behavior functions under `Include/MyLib/`.
+- Updated the specification to match the current `CreateProcessW` Python process tracking, M15 filter, `market_state` range `0..6`, and `spread_limit = 60`.
+
+### 2026-05-02
+
+- Added entry suppression when `res_chk = 0`.
+- Moved time-limit handling before Python readiness and spread checks.
+- Split startup flags for H4 and H1 initial processing.
+- Switched OHLC retrieval to `CopyRates` and exported closed bars only.

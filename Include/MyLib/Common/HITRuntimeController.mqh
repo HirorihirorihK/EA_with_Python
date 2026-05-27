@@ -1,0 +1,289 @@
+#ifndef HIT_RUNTIME_CONTROLLER_MQH
+#define HIT_RUNTIME_CONTROLLER_MQH
+
+//+------------------------------------------------------------------+
+//| ティック情報を取得する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 現在のAsk/Bid/スプレッド情報を取得してTickContextへ格納します。
+ *
+ * @param ctx 取得したティック情報を格納する構造体参照。
+ * @return 取得成功時はtrue、ティック情報を取得できない場合はfalse。
+ */
+bool GetTickContext(TickContext &ctx)
+  {
+   MqlTick last_tick;
+   if(!SymbolInfoTick(_Symbol, last_tick))
+      return false;
+
+   ctx.ask           = last_tick.ask;
+   ctx.bid           = last_tick.bid;
+   ctx.spread_points = MathRound((ctx.ask - ctx.bid) / Point());
+   ctx.spread        = ctx.spread_points * Point();
+   ctx.digits        = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+
+   return true;
+  }
+
+//+------------------------------------------------------------------+
+//| 期限切れ注文・期限切れポジションを処理する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 期限切れの未約定注文と保有ポジションを処理します。
+ *
+ * 未約定注文はENTRY_H1_LIMIT時間、保有ポジションはCLOSE_H1_LIMIT時間を基準に判定します。
+ * 新規注文条件とは独立して、OnTickの早い段階で実行される想定です。
+ */
+void ManageExpiredTrades()
+  {
+   if(OrdersTotal() > 0)
+      CancelExpiredOrders();
+
+   if(PositionsTotal() > 0)
+      CloseExpiredPositions();
+  }
+
+//+------------------------------------------------------------------+
+//| H4更新検知とトレンド判定Python起動を処理する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief H4新バーまたは初回起動を検知し、トレンド判定Pythonを起動します。
+ *
+ * @param state EA全体の状態。トレンド更新開始フラグを更新します。
+ *
+ * Python処理中はdoneファイルが存在しないため、CSVの上書きと二重起動を抑止します。
+ */
+void ProcessTrendUpdate(EAState &state)
+  {
+   int current_bars_H4 = iBars(NULL, PERIOD_H4);
+   if(g_pre_bars_H4 == 0)
+      g_pre_bars_H4 = current_bars_H4;
+
+   int  bars_H4_change = current_bars_H4 - g_pre_bars_H4;
+   bool trend_trigger  = (bars_H4_change > 0 || g_init_trend_pending);
+
+   if(!trend_trigger)
+      return;
+
+   if(RecordOHLCAndExecuteBatch_Trend(state))
+     {
+      g_init_trend_pending = false;
+      g_pre_bars_H4        = current_bars_H4;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| トレンド判定Pythonの完了状態を返す関数
+//+------------------------------------------------------------------+
+/**
+ * @brief H4トレンド判定Pythonの完了状態を確認します。
+ *
+ * @return `process_done_trend.txt` が存在する場合はtrue、未完了の場合はfalse。
+ */
+bool IsTrendResultReady()
+  {
+   return IsProcessResultReady(done_trend_file, running_trend_file, trend_state_file, "trend", g_trend_process);
+  }
+
+//+------------------------------------------------------------------+
+//| トレンド判定結果をEA状態へ反映する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 完了済みのH4トレンド判定結果をEA状態へ反映します。
+ *
+ * @param state EA全体の状態。`trend_state` と最終更新時刻が更新されます。
+ */
+void RefreshTrendState(EAState &state)
+  {
+   GetTrendState(state);
+  }
+
+//+------------------------------------------------------------------+
+//| H1更新検知とエントリー価格生成Python起動を処理する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief H1新バーまたは初回起動を検知し、エントリー価格生成Pythonを起動します。
+ *
+ * @param state EA全体の状態。ターゲット価格更新開始フラグや判定リトライ状態を更新します。
+ *
+ * Python処理中はdoneファイルが存在しないため、H1 CSVの上書きと二重起動を抑止します。
+ */
+void ProcessEntryUpdate(EAState &state)
+  {
+   int current_bars_H1 = iBars(NULL, PERIOD_H1);
+   if(g_pre_bars_H1 == 0)
+      g_pre_bars_H1 = current_bars_H1;
+
+   int  bars_H1_change = current_bars_H1 - g_pre_bars_H1;
+   bool entry_trigger  = (bars_H1_change > 0 || g_init_entry_pending);
+
+   if(!entry_trigger)
+      return;
+
+   if(RecordOHLCAndExecuteBatch_Entry(state))
+     {
+      g_init_entry_pending = false;
+      g_bars_H1_check      = true;
+      state.chk_cnt        = 0;
+      state.last_chk       = 0;
+     g_pre_bars_H1        = current_bars_H1;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| M15更新検知とエントリータイミング判定トリガーを処理する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief M15新バーを検知し、H1候補価格の発注判定を実行できる状態にします。
+ *
+ * M15は方向判定を上書きする足ではなく、H4/H1で決めた候補価格を発注する
+ * タイミング確認として使います。初回は直近の確定M15足で一度だけ判定可能にします。
+ */
+void ProcessM15EntryTimingUpdate()
+  {
+   int current_bars_M15 = iBars(NULL, PERIOD_M15);
+   if(current_bars_M15 <= 0)
+      return;
+
+   if(g_pre_bars_M15 == 0)
+     {
+      g_pre_bars_M15 = current_bars_M15;
+      g_bars_M15_check = true;
+      return;
+     }
+
+   int bars_M15_change = current_bars_M15 - g_pre_bars_M15;
+   if(bars_M15_change <= 0)
+      return;
+
+   g_bars_M15_check = true;
+   g_pre_bars_M15 = current_bars_M15;
+  }
+
+//+------------------------------------------------------------------+
+//| チャートコメント文字列を作成する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief チャート左上に表示するステータスメッセージを組み立てます。
+ *
+ * @param ctx 現在のAsk/Bid/スプレッド情報。
+ * @return Comment()へ渡す表示用文字列。
+ */
+string BuildStatusMessage(TickContext &ctx)
+  {
+   string message = StringFormat(
+                       " \nAsk: %." + IntegerToString(ctx.digits) + "f"
+                       "\nBid: %." + IntegerToString(ctx.digits) + "f"
+                       "\nSpread: %." + IntegerToString(ctx.digits) + "f"
+                       "\nSpread Points: %.0f"
+                       "\n\nLast Trend Update:\n %s"
+                        "\n\nMarket State: %d (%s)"
+                       "\n\nLast Target Update:\n %s"
+                       "\n\nMy Used Count: %d / %d"
+                       "\nSplit Zone: %s  N=%d  ZoneID=%s"
+                       "\n\n[T1 Buy Stop ] en: %." + IntegerToString(ctx.digits) + "f  tp: %." + IntegerToString(ctx.digits) + "f  sl: %." + IntegerToString(ctx.digits) + "f"
+                       "\n[T2 Buy Limit] en: %." + IntegerToString(ctx.digits) + "f  tp: %." + IntegerToString(ctx.digits) + "f  sl: %." + IntegerToString(ctx.digits) + "f"
+                       "\n[T3 Sell Stop] en: %." + IntegerToString(ctx.digits) + "f  tp: %." + IntegerToString(ctx.digits) + "f  sl: %." + IntegerToString(ctx.digits) + "f"
+                       "\n[T4 SellLimit] en: %." + IntegerToString(ctx.digits) + "f  tp: %." + IntegerToString(ctx.digits) + "f  sl: %." + IntegerToString(ctx.digits) + "f\n",
+                       ctx.ask, ctx.bid, ctx.spread, ctx.spread_points,
+                       TimeToString(g_ea.last_trend_update, TIME_DATE | TIME_MINUTES),
+                        g_ea.trend_state, MarketStateName(g_ea.trend_state),
+                       TimeToString(g_ea.last_target_update, TIME_DATE | TIME_MINUTES),
+                       CountMyUsed(), EffectivePositionLimit(),
+                       (use_split_entry_zone ? "ON" : "OFF"), EffectiveSplitEntryCount(), g_ea.zone_candidate_id,
+                       g_ea.en_price[1], g_ea.tp_price[1], g_ea.sl_price[1],
+                       g_ea.en_price[2], g_ea.tp_price[2], g_ea.sl_price[2],
+                       g_ea.en_price[3], g_ea.tp_price[3], g_ea.sl_price[3],
+                       g_ea.en_price[4], g_ea.tp_price[4], g_ea.sl_price[4]
+                    );
+   return message;
+  }
+
+//+------------------------------------------------------------------+
+//| チャートコメントを更新する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief チャート上のステータスコメントを更新します。
+ *
+ * @param ctx 現在のAsk/Bid/スプレッド情報。
+ */
+void UpdateStatusComment(TickContext &ctx)
+  {
+   Comment(BuildStatusMessage(ctx));
+  }
+
+//+------------------------------------------------------------------+
+//| market_stateの表示名を返す関数
+//+------------------------------------------------------------------+
+/**
+ * @brief H4 market_stateの人間可読名を返します。
+ *
+ * @param market_state Pythonが出力したH4環境分類（0..5、6は技術エラー停止）。
+ * @return 表示用ラベル。
+ */
+string MarketStateName(const int market_state)
+  {
+   switch(market_state)
+     {
+      case MARKET_LOW_VOL_RANGE:
+         return "LOW_VOL_RANGE";
+      case MARKET_HIGH_VOL_RANGE:
+         return "HIGH_VOL_RANGE";
+      case MARKET_LOW_VOL_UP:
+         return "LOW_VOL_UP";
+      case MARKET_HIGH_VOL_UP:
+         return "HIGH_VOL_UP";
+      case MARKET_LOW_VOL_DOWN:
+         return "LOW_VOL_DOWN";
+      case MARKET_HIGH_VOL_DOWN:
+         return "HIGH_VOL_DOWN";
+      case MARKET_TECHNICAL_ERROR_STOP:
+         return "TECHNICAL_ERROR_STOP";
+      default:
+         return "UNKNOWN";
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| スプレッドが許容範囲内か判定する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 現在スプレッドが入力パラメータの許容範囲内か判定します。
+ *
+ * @param ctx 現在のスプレッド情報。
+ * @return 許容範囲内ならtrue、超過している場合はfalse。
+ */
+bool IsSpreadAllowed(TickContext &ctx)
+  {
+   return (ctx.spread <= spread_limit * Point());
+  }
+
+//+------------------------------------------------------------------+
+//| エントリー価格生成Pythonの完了状態を返す関数
+//+------------------------------------------------------------------+
+/**
+ * @brief H1エントリー価格生成Pythonの完了状態を確認します。
+ *
+ * @return `process_done_entry.txt` が存在する場合はtrue、未完了の場合はfalse。
+ */
+bool IsEntryResultReady()
+  {
+   return IsProcessResultReady(done_entry_file, running_entry_file, target_prices_file, "entry", g_entry_process);
+  }
+
+//+------------------------------------------------------------------+
+//| ターゲット価格をEA状態へ反映する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 完了済みのH1エントリー価格生成結果をEA状態へ反映します。
+ *
+ * @param state EA全体の状態。`res_chk` と各注文タイプのen/tp/slが更新されます。
+ */
+void RefreshTargetPrices(EAState &state)
+  {
+   GetTargetPrices(state);
+  }
+
+//+------------------------------------------------------------------+
+
+#endif

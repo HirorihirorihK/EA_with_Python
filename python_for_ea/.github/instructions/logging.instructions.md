@@ -1,0 +1,29 @@
+---
+applyTo: "**/*.py,config/**/*.toml"
+---
+
+# Logging Instructions
+
+## Basic Rules
+
+- `print` は使用しない。
+- `logging` を使用する。
+- logging設定は TOML で管理する。
+- logger は用途別に分離する。
+- 例外発生時は `logger.exception(...)` を優先する。
+- ユーザー向けメッセージと内部ログを分離する。
+
+## Logger Separation
+
+必要に応じて、以下のように logger を分ける。
+
+- アプリ全体: `app`
+- SQL / DB: `sql`
+- バッチ / Worker: `worker`
+- 外部I/O: `io`
+
+## Log Level
+
+- 開発環境では `DEBUG` 以上を出力する。
+- 本番環境では必要に応じて `INFO` 以上を基本にする。
+- エラー原因の調査に必要な情報は内部ログに残す。

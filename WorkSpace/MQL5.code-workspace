@@ -1,0 +1,37 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../../../../../../../../ea_py"
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"*.mqh": "cpp",
+			"*.mq4": "cpp",
+			"*.mq5": "cpp"
+		},
+		"clangd.fallbackFlags": [
+			"-xc++",
+			"-std=c++17",
+			"-D__MQL__",
+			"-D__MQL5__",
+			"-includec:/Users/new/.cursor/extensions/ngsoftware.mql-clangd-1.1.42-universal/files/mql_clangd_compat.h",
+			"-fms-extensions",
+			"-fms-compatibility",
+			"-ferror-limit=0",
+			"-Wno-invalid-token-paste",
+			"-Wno-unused-value",
+			"-Wno-unknown-pragmas",
+			"-Wno-writable-strings",
+			"-Xclang",
+			"-Wno-invalid-pp-directive",
+			"-Wno-unknown-directives",
+			"-Wno-language-extension-token",
+			"-Ic:/Users/new/AppData/Roaming/MetaQuotes/Terminal/5BDB0B60344C088C2FA5CA35699BAAFD/MQL5",
+			"-Ic:/Users/new/AppData/Roaming/MetaQuotes/Terminal/5BDB0B60344C088C2FA5CA35699BAAFD/MQL5/Include"
+		]
+	}
+}

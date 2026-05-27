@@ -1,0 +1,1046 @@
+#ifndef HIT_ENTRY_SIGNAL_MQH
+#define HIT_ENTRY_SIGNAL_MQH
+
+//| エントリー判定が必要な場合のみ注文処理を実行する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief エントリー判定タイミングに到達している場合のみ注文処理を実行します。
+ *
+ * @param state EA全体の状態。
+ * @param ctx 現在のAsk/Bid/スプレッド情報。
+ *
+ * 判定前チェック、許可注文の送信、リトライ状態更新をまとめて制御します。
+ */
+void ProcessEntryDecisionIfNeeded(EAState &state, TickContext &ctx)
+  {
+   if(!ShouldRunEntryDecision(state))
+      return;
+
+   g_bars_H1_check = false;
+   g_bars_M15_check = false;
+   state.last_chk  = TimeCurrent();
+
+   if(!ValidateEntryPreconditions(state))
+      return;
+
+   int sent_success = SendAllowedEntryOrders(state, ctx);
+   UpdateEntryRetryState(state, sent_success);
+  }
+
+//+------------------------------------------------------------------+
+//| エントリー判定を実行するタイミングか判定する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief エントリー判定を実行するタイミングか確認します。
+ *
+ * @param state EA全体の状態。前回判定時刻を参照します。
+ * @return H1候補が有効で、M15確定足が更新され、前回判定から一定秒数以上経過していればtrue。
+ */
+bool ShouldRunEntryDecision(EAState &state)
+  {
+   return (g_bars_H1_check && g_bars_M15_check && TimeCurrent() - state.last_chk >= ENTRY_RETRY_SECONDS);
+  }
+
+//+------------------------------------------------------------------+
+//| エントリー判定前の共通チェックを行う関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 新規注文前の共通条件を検証します。
+ *
+ * @param state EA全体の状態。
+ * @return 注文判定を続行できる場合はtrue、停止すべき場合はfalse。
+ *
+ * `res_chk`、market_state、対象EAの注文/ポジション数上限を確認します。
+ * market_state=6は相場ボラ停止ではなく、Python/CSV/API失敗時の技術エラー停止として扱います。
+ */
+bool ValidateEntryPreconditions(EAState &state)
+  {
+   if(use_split_entry_zone)
+     {
+      if(state.zone_res_chk != 1)
+        {
+         Print("[Entry Skip] target_zones invalid. zone_res_chk=", state.zone_res_chk);
+         state.chk_cnt = 0;
+         return false;
+        }
+     }
+   else if(state.res_chk != 1)
+     {
+      Print("[Entry Skip] target_prices invalid. res_chk=", state.res_chk);
+      state.chk_cnt = 0;
+      return false;
+     }
+
+   if(state.trend_state < MARKET_LOW_VOL_RANGE || state.trend_state > MARKET_HIGH_VOL_DOWN)
+     {
+      Print("[Entry Skip] invalid market_state=", state.trend_state);
+      state.chk_cnt = 0;
+      return false;
+     }
+
+   if(IsTargetCandidateExpired(state))
+     {
+      Print("[Entry Skip] H1 target candidate expired. loaded_at=",
+            TimeToString(state.target_loaded_at, TIME_DATE | TIME_SECONDS));
+      state.chk_cnt = 0;
+      return false;
+     }
+
+   if(IsTargetCandidateTooOldForExecution(state))
+     {
+      Print("[Entry Skip] H1 target candidate is too old for new execution. age=",
+            TargetCandidateAgeText(state),
+            " max_age_minutes=", input_entry_max_candidate_age_minutes,
+            " loaded_at=", TimeToString(state.target_loaded_at, TIME_DATE | TIME_SECONDS));
+      state.chk_cnt = 0;
+      return false;
+     }
+
+   int used = CountMyUsed();
+   int position_limit = EffectivePositionLimit();
+   if(used >= position_limit)
+     {
+      Print("Position limit exceeded: used=", used, " limit=", position_limit);
+      return false;
+     }
+
+   return true;
+  }
+
+//+------------------------------------------------------------------+
+//| H1候補価格の有効期限を判定する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief H1候補価格がENTRY_H1_LIMIT時間を超えて古くなっていないか判定します。
+ *
+ * @param state EA全体の状態。H1候補価格の読込時刻を参照します。
+ * @return 候補価格が期限切れの場合はtrue。
+ */
+bool IsTargetCandidateExpired(EAState &state)
+  {
+   if(state.target_loaded_at <= 0)
+      return false;
+
+   int expiration_seconds = ENTRY_H1_LIMIT * PeriodSeconds(PERIOD_H1);
+   if(expiration_seconds <= 0)
+      return false;
+
+   return (TimeCurrent() - state.target_loaded_at >= expiration_seconds);
+  }
+
+//+------------------------------------------------------------------+
+//| H1候補価格の発注許容年齢を判定する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief M15確認が遅れて整った古いH1候補で新規注文しないように判定します。
+ *
+ * @param state EA全体の状態。H1候補価格の読込時刻を参照します。
+ * @return 入力で指定した最大経過分数を超えている場合はtrue。
+ */
+bool IsTargetCandidateTooOldForExecution(EAState &state)
+  {
+   if(input_entry_max_candidate_age_minutes <= 0)
+      return false;
+   if(state.target_loaded_at <= 0)
+      return false;
+
+   int max_age_seconds = input_entry_max_candidate_age_minutes * 60;
+   if(max_age_seconds <= 0)
+      return false;
+
+   return (TargetCandidateAgeSeconds(state) > max_age_seconds);
+  }
+
+//+------------------------------------------------------------------+
+//| H1候補価格の経過秒数を返す関数
+//+------------------------------------------------------------------+
+/**
+ * @brief H1候補価格をEAへ読み込んでからの経過秒数を返します。
+ */
+int TargetCandidateAgeSeconds(EAState &state)
+  {
+   if(state.target_loaded_at <= 0)
+      return -1;
+
+   return (int)(TimeCurrent() - state.target_loaded_at);
+  }
+
+//+------------------------------------------------------------------+
+//| H1候補価格の経過秒数をログ用文字列にする関数
+//+------------------------------------------------------------------+
+/**
+ * @brief H1候補価格の経過秒数をログへ出しやすい文字列にします。
+ */
+string TargetCandidateAgeText(EAState &state)
+  {
+   int age_seconds = TargetCandidateAgeSeconds(state);
+   if(age_seconds < 0)
+      return "unknown";
+
+   return IntegerToString(age_seconds) + "s";
+  }
+
+//+------------------------------------------------------------------+
+//| 許可された注文タイプだけを順番に送信する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief H4 market_stateで許可された注文タイプだけを順番に送信します。
+ *
+ * @param state EA全体の状態。各注文タイプのen/tp/slを参照します。
+ * @param ctx 現在のAsk/Bid/スプレッド情報。
+ * @return 送信成功した注文数。
+ */
+int SendAllowedEntryOrders(EAState &state, TickContext &ctx)
+  {
+   if(use_split_entry_zone)
+      return SendAllowedSplitEntryOrders(state, ctx);
+
+   int sent_success = 0;
+
+   for(int t = 1; t <= 4; t++)
+     {
+      int used = CountMyUsed();
+      int position_limit = EffectivePositionLimit();
+      if(used >= position_limit)
+        {
+         Print("Position limit reached while sending. used=", used, " limit=", position_limit);
+         break;
+        }
+
+      if(!IsOrderTypeAllowedByTrend(t, state.trend_state))
+        {
+          Print("[Skip] orderType=", t, " not allowed by market_state=", state.trend_state,
+                " (", MarketStateName(state.trend_state), ")");
+         continue;
+        }
+
+      if(TrySendEntryOrder(t, state, ctx))
+         sent_success++;
+     }
+
+   return sent_success;
+  }
+
+//+------------------------------------------------------------------+
+//| 分割本数を安全な範囲に丸める関数
+//+------------------------------------------------------------------+
+int EffectiveSplitEntryCount()
+  {
+   int count = split_entry_count;
+   if(count < 1)
+      count = 1;
+   if(count > 10)
+      count = 10;
+
+   return count;
+  }
+
+//+------------------------------------------------------------------+
+//| 2桁番号を作る関数
+//+------------------------------------------------------------------+
+string TwoDigit(const int value)
+  {
+   if(value >= 0 && value < 10)
+      return "0" + IntegerToString(value);
+
+   return IntegerToString(value);
+  }
+
+//+------------------------------------------------------------------+
+//| 分割slot識別子を作る関数
+//+------------------------------------------------------------------+
+string SplitSlotKey(const string candidate_id, const int slot_index, const int split_count)
+  {
+   return "Z" + candidate_id + "#" + TwoDigit(slot_index) + "/" + TwoDigit(split_count);
+  }
+
+//+------------------------------------------------------------------+
+//| ゾーン内の分割価格を返す関数
+//+------------------------------------------------------------------+
+double SplitEntryPrice(const double zone_low, const double zone_high, const int slot_index, const int split_count)
+  {
+   int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+   if(split_count <= 1)
+      return NormalizeDouble((zone_low + zone_high) / 2.0, digits);
+
+   double ratio = (double)(slot_index - 1) / (double)(split_count - 1);
+   return NormalizeDouble(zone_low + (zone_high - zone_low) * ratio, digits);
+  }
+
+//+------------------------------------------------------------------+
+//| 注文ロットがブローカー制約を満たすか判定する関数
+//+------------------------------------------------------------------+
+bool IsTradeVolumeAllowed(const double volume, const string context)
+  {
+   double min_volume = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double max_volume = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double step_volume = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+
+   if(volume <= 0.0 || min_volume <= 0.0 || max_volume <= 0.0 || step_volume <= 0.0)
+     {
+      Print("[Split Lot Skip] invalid volume setting. context=", context,
+            " volume=", volume, " min=", min_volume,
+            " max=", max_volume, " step=", step_volume);
+      return false;
+     }
+
+   if(volume < min_volume || volume > max_volume)
+     {
+      Print("[Split Lot Skip] volume out of range. context=", context,
+            " volume=", volume, " min=", min_volume, " max=", max_volume);
+      return false;
+     }
+
+   double steps = (volume - min_volume) / step_volume;
+   double nearest = MathRound(steps);
+   if(MathAbs(steps - nearest) > 0.000001)
+     {
+      Print("[Split Lot Skip] volume does not match broker step. context=", context,
+            " volume=", volume, " min=", min_volume, " step=", step_volume);
+      return false;
+     }
+
+   return true;
+  }
+
+//+------------------------------------------------------------------+
+//| 分割注文1本あたりのロットを計算する関数
+//+------------------------------------------------------------------+
+bool CalcSplitOrderVolume(const int split_count, double &volume)
+  {
+   if(split_count <= 0)
+      return false;
+
+   string context = "";
+   if(split_lot_mode == SPLIT_LOT_TOTAL)
+     {
+      volume = split_total_lot_size / (double)split_count;
+      context = "total";
+     }
+   else
+     {
+      volume = split_fixed_lot_size;
+      context = "fixed";
+     }
+
+   if(!IsTradeVolumeAllowed(volume, context))
+      return false;
+
+   int volume_digits = 2;
+   double step_volume = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   if(step_volume > 0.0)
+     {
+      volume_digits = 0;
+      double step = step_volume;
+      while(step < 1.0 && volume_digits < 8)
+        {
+         step *= 10.0;
+         volume_digits++;
+        }
+     }
+
+   volume = NormalizeDouble(volume, volume_digits);
+   return true;
+  }
+
+//+------------------------------------------------------------------+
+//| 予測ゾーンが有効値か判定する関数
+//+------------------------------------------------------------------+
+bool HasValidZonePrices(const double zone_low, const double zone_high, const double tp, const double sl)
+  {
+   return (zone_low > 0.0 && zone_high > 0.0 && tp > 0.0 && sl > 0.0 && zone_low <= zone_high);
+  }
+
+//+------------------------------------------------------------------+
+//| 注文タイプごとのゾーン価格整合条件を判定する関数
+//+------------------------------------------------------------------+
+bool IsTargetZoneOrderConditionMatched(const int orderType,
+                                       TickContext &ctx,
+                                       const double zone_low,
+                                       const double zone_high,
+                                       const double tp,
+                                       const double sl)
+  {
+   switch(orderType)
+     {
+      case 1: // Buy Stop
+         return (ctx.ask < zone_low && tp > zone_high && sl < zone_low);
+
+      case 2: // Buy Limit
+         return (ctx.ask > zone_high && tp > zone_high && sl < zone_low);
+
+      case 3: // Sell Stop
+         return (ctx.bid > zone_high && tp < zone_low && sl > zone_high);
+
+      case 4: // Sell Limit
+         return (ctx.bid < zone_low && tp < zone_low && sl > zone_high);
+
+      default:
+         return false;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| 分割ゾーン用の注文送信ループ
+//+------------------------------------------------------------------+
+int SendAllowedSplitEntryOrders(EAState &state, TickContext &ctx)
+  {
+   int sent_success = 0;
+
+   for(int t = 1; t <= 4; t++)
+     {
+      int used = CountMyUsed();
+      int position_limit = EffectivePositionLimit();
+      if(used >= position_limit)
+        {
+         Print("Position limit reached while sending split entries. used=", used,
+               " limit=", position_limit);
+         break;
+        }
+
+      if(!IsOrderTypeAllowedByTrend(t, state.trend_state))
+        {
+         Print("[Split Skip] orderType=", t, " not allowed by market_state=", state.trend_state,
+               " (", MarketStateName(state.trend_state), ")");
+         continue;
+        }
+
+      sent_success += TrySendSplitEntryOrders(t, state, ctx);
+     }
+
+   return sent_success;
+  }
+
+//+------------------------------------------------------------------+
+//| 1戦略分の分割注文を送信する関数
+//+------------------------------------------------------------------+
+int TrySendSplitEntryOrders(const int orderType, EAState &state, TickContext &ctx)
+  {
+   string entry_type = EntryTypeName(orderType);
+   double cur_price = CurrentPriceForOrderType(orderType, ctx);
+   double zone_low = state.zone_low[orderType];
+   double zone_high = state.zone_high[orderType];
+   double tp = state.zone_tp[orderType];
+   double sl = state.zone_sl[orderType];
+
+   if(!HasValidZonePrices(zone_low, zone_high, tp, sl))
+     {
+      Print("[Split Skip] invalid target zone. orderType=", orderType,
+            " zone=", zone_low, "-", zone_high, " tp=", tp, " sl=", sl,
+            " candidate_id=", state.zone_candidate_id);
+      return 0;
+     }
+
+   if(!IsTargetZoneOrderConditionMatched(orderType, ctx, zone_low, zone_high, tp, sl))
+     {
+      Print("[No Split ", entry_type, "] cur=", cur_price,
+            " zone=", zone_low, "-", zone_high, " tp=", tp, " sl=", sl,
+            " candidate_id=", state.zone_candidate_id);
+      return 0;
+     }
+
+   if(!IsM15ZoneTimingConfirmed(orderType, ctx, zone_low, zone_high))
+     {
+      Print("[No Split ", entry_type, "] M15 zone timing not confirmed. cur=", cur_price,
+            " zone=", zone_low, "-", zone_high,
+            " candidate_id=", state.zone_candidate_id);
+      return 0;
+     }
+
+   int split_count = EffectiveSplitEntryCount();
+   double volume = 0.0;
+   if(!CalcSplitOrderVolume(split_count, volume))
+      return 0;
+
+   int sent_success = 0;
+   for(int slot = 1; slot <= split_count; slot++)
+     {
+      int used = CountMyUsed();
+      int position_limit = EffectivePositionLimit();
+      if(used >= position_limit)
+        {
+         Print("Position limit reached during split slots. used=", used,
+               " limit=", position_limit);
+         break;
+        }
+
+      string slot_key = SplitSlotKey(state.zone_candidate_id, slot, split_count);
+      if(HasExistingSplitSlot(slot_key))
+        {
+         Print("[Split Skip] slot already exists. key=", slot_key);
+         continue;
+        }
+
+      double en = SplitEntryPrice(zone_low, zone_high, slot, split_count);
+      if(!IsTargetPriceOrderConditionMatched(orderType, ctx, en, tp, sl))
+        {
+         Print("[Split Skip] slot price no longer valid. key=", slot_key,
+               " cur=", cur_price, " en=", en, " tp=", tp, " sl=", sl);
+         continue;
+        }
+
+      if(!MeetsTradeDistanceRules(orderType, ctx, en, tp, sl))
+         continue;
+
+      Print("[Split ", entry_type, " Order Try] key=", slot_key,
+            " en=", en, " tp=", tp, " sl=", sl, " volume=", volume);
+
+      if(SendOrder(orderType, en, tp, sl, volume, slot_key))
+        {
+         Print("[Split ", entry_type, " Order Sent] key=", slot_key,
+               " en=", en, " tp=", tp, " sl=", sl, " volume=", volume);
+         sent_success++;
+        }
+      else
+        {
+         Print("[Split ", entry_type, " Order Failed] key=", slot_key,
+               " en=", en, " tp=", tp, " sl=", sl, " volume=", volume);
+        }
+     }
+
+   return sent_success;
+  }
+
+//+------------------------------------------------------------------+
+//| 注文タイプ1件分の価格検証と注文送信を行う関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 注文タイプ1件分の価格検証と注文送信を行います。
+ *
+ * @param orderType 注文タイプ。1=Buy Stop、2=Buy Limit、3=Sell Stop、4=Sell Limit。
+ * @param state EA全体の状態。対象注文タイプのen/tp/slを参照します。
+ * @param ctx 現在のAsk/Bid情報。
+ * @return 注文送信に成功した場合はtrue、それ以外はfalse。
+ */
+bool TrySendEntryOrder(const int orderType, EAState &state, TickContext &ctx)
+  {
+   string entry_type = EntryTypeName(orderType);
+   double cur_price  = CurrentPriceForOrderType(orderType, ctx);
+
+   double en = state.en_price[orderType];
+   double tp = state.tp_price[orderType];
+   double sl = state.sl_price[orderType];
+
+   if(!HasValidTargetPrices(en, tp, sl))
+     {
+      Print("[Skip] invalid target prices. orderType=", orderType,
+            " en=", en, " tp=", tp, " sl=", sl,
+            " candidate_age=", TargetCandidateAgeText(state));
+      return false;
+     }
+
+   bool ok = IsTargetPriceOrderConditionMatched(orderType, ctx, en, tp, sl);
+   if(!ok)
+     {
+      Print("[No ", entry_type, "] cur=", cur_price, " en=", en, " tp=", tp, " sl=", sl,
+            " candidate_age=", TargetCandidateAgeText(state));
+      return false;
+     }
+
+   if(!IsM15EntryTimingConfirmed(orderType, ctx, en))
+     {
+      Print("[No ", entry_type, "] M15 timing not confirmed. cur=", cur_price, " en=", en,
+            " candidate_age=", TargetCandidateAgeText(state),
+            " max_age_minutes=", input_entry_max_candidate_age_minutes);
+      return false;
+     }
+
+   if(!MeetsTradeDistanceRules(orderType, ctx, en, tp, sl))
+      return false;
+
+   Print("[", entry_type, " Order Try at ", cur_price, "] en=", en, " tp=", tp, " sl=", sl);
+
+   if(SendOrder(orderType, en, tp, sl, lot_size, ""))
+     {
+      Print("[", entry_type, " Order Sent] ticket ok. en=", en, " tp=", tp, " sl=", sl);
+      return true;
+     }
+
+   Print("[", entry_type, " Order Failed] en=", en, " tp=", tp, " sl=", sl);
+   return false;
+  }
+
+//+------------------------------------------------------------------+
+//| 注文タイプ名を返す関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 注文タイプ番号に対応する表示名を返します。
+ *
+ * @param orderType 注文タイプ番号。
+ * @return 注文タイプの表示名。不正値の場合は"Unknown"。
+ */
+string EntryTypeName(const int orderType)
+  {
+   switch(orderType)
+     {
+      case 1:
+         return "Buy Stop";
+      case 2:
+         return "Buy Limit";
+      case 3:
+         return "Sell Stop";
+      case 4:
+         return "Sell Limit";
+      default:
+         return "Unknown";
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| 注文タイプに応じた現在価格を返す関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 注文タイプに応じて価格比較に使う現在価格を返します。
+ *
+ * @param orderType 注文タイプ番号。
+ * @param ctx 現在のAsk/Bid情報。
+ * @return 買い系注文ではAsk、売り系注文ではBid。
+ */
+double CurrentPriceForOrderType(const int orderType, TickContext &ctx)
+  {
+   if(orderType == 1 || orderType == 2)
+      return ctx.ask;
+
+   return ctx.bid;
+  }
+
+//+------------------------------------------------------------------+
+//| 注文タイプごとの価格整合条件を判定する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 注文タイプごとの現在価格・エントリー・TP・SLの大小関係を検証します。
+ *
+ * @param orderType 注文タイプ番号。
+ * @param ctx 現在のAsk/Bid情報。
+ * @param en エントリー価格。
+ * @param tp 利確価格。
+ * @param sl 損切価格。
+ * @return 注文タイプの価格条件を満たす場合はtrue。
+ */
+bool IsTargetPriceOrderConditionMatched(const int orderType, TickContext &ctx, const double en, const double tp, const double sl)
+  {
+   switch(orderType)
+     {
+      case 1: // Buy Stop
+         return (ctx.ask < en && tp > en && sl < en);
+
+      case 2: // Buy Limit
+         return (ctx.ask > en && tp > en && sl < en);
+
+      case 3: // Sell Stop
+         return (ctx.bid > en && tp < en && sl > en);
+
+      case 4: // Sell Limit
+         return (ctx.bid < en && tp < en && sl > en);
+
+      default:
+         return false;
+   }
+  }
+
+//+------------------------------------------------------------------+
+//| 順張りStop注文タイプか判定する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief M15反転確認を待たずH1候補で発注する順張りStop注文か判定します。
+ *
+ * @param orderType 注文タイプ番号。
+ * @return Buy Stop または Sell Stop の場合はtrue。
+ */
+bool IsTrendStopOrderType(const int orderType)
+  {
+   return (orderType == 1 || orderType == 3);
+  }
+
+//+------------------------------------------------------------------+
+//| M15確定足によるエントリータイミング確認
+//+------------------------------------------------------------------+
+/**
+ * @brief H1候補価格に対してM15の発注タイミングが整っているか判定します。
+ *
+ * @param orderType 注文タイプ番号。
+ * @param ctx 現在のAsk/Bid情報。
+ * @param en H1で決めたエントリー候補価格。
+ * @return M15確認条件を満たす場合はtrue。
+ *
+ * H4/H1の方向判断は維持し、M15では「候補価格に近い」「直近確定足が
+ * 順張り/反転の根拠を持つ」ことだけを確認します。
+ */
+bool IsM15EntryTimingConfirmed(const int orderType, TickContext &ctx, const double en)
+  {
+   if(!use_m15_entry_filter)
+      return true;
+
+   if(IsTrendStopOrderType(orderType))
+      return true;
+
+   MqlRates rates[];
+   int copied = CopyRates(_Symbol, PERIOD_M15, OHLC_START_SHIFT, M15_CONFIRM_BARS, rates);
+   if(copied < 3)
+     {
+      Print("[M15 Filter] insufficient M15 bars. copied=", copied);
+      return false;
+     }
+
+   int last_index = copied - 1;
+   int prev_index = copied - 2;
+
+   double avg_range = AverageM15Range(rates, copied);
+   double min_zone = M15_MIN_ENTRY_ZONE_POINTS * Point();
+   double entry_zone = avg_range * m15_entry_zone_atr_multiplier;
+   if(entry_zone < min_zone)
+      entry_zone = min_zone;
+
+   double cur_price = CurrentPriceForOrderType(orderType, ctx);
+   if(MathAbs(cur_price - en) > entry_zone)
+     {
+      Print("[M15 Filter] ", EntryTypeName(orderType), " is not near entry zone. cur=",
+            cur_price, " en=", en, " zone=", entry_zone);
+      return false;
+     }
+
+   if(!IsM15SignalAligned(orderType, rates[prev_index], rates[last_index], en, entry_zone))
+      return false;
+
+   return IsM15ImbalanceConfirmationPassed(orderType, rates, copied, last_index);
+  }
+
+//+------------------------------------------------------------------+
+//| M15確定足によるゾーンエントリータイミング確認
+//+------------------------------------------------------------------+
+/**
+ * @brief H1予測ゾーンに対してM15の発注タイミングが整っているか判定します。
+ */
+bool IsM15ZoneTimingConfirmed(const int orderType,
+                              TickContext &ctx,
+                              const double zone_low,
+                              const double zone_high)
+  {
+   if(!use_m15_entry_filter)
+      return true;
+
+   if(IsTrendStopOrderType(orderType))
+      return true;
+
+   MqlRates rates[];
+   int copied = CopyRates(_Symbol, PERIOD_M15, OHLC_START_SHIFT, M15_CONFIRM_BARS, rates);
+   if(copied < 3)
+     {
+      Print("[M15 Zone Filter] insufficient M15 bars. copied=", copied);
+      return false;
+     }
+
+   int last_index = copied - 1;
+   int prev_index = copied - 2;
+
+   double avg_range = AverageM15Range(rates, copied);
+   double min_zone = M15_MIN_ENTRY_ZONE_POINTS * Point();
+   double entry_zone = avg_range * m15_entry_zone_atr_multiplier;
+   if(entry_zone < min_zone)
+      entry_zone = min_zone;
+
+   double cur_price = CurrentPriceForOrderType(orderType, ctx);
+   if(cur_price < zone_low - entry_zone || cur_price > zone_high + entry_zone)
+     {
+      Print("[M15 Zone Filter] ", EntryTypeName(orderType), " is not near target zone. cur=",
+            cur_price, " zone=", zone_low, "-", zone_high, " padding=", entry_zone);
+      return false;
+     }
+
+   double representative = (zone_low + zone_high) / 2.0;
+   double expanded_zone = entry_zone + (zone_high - zone_low) / 2.0;
+   if(!IsM15SignalAligned(orderType, rates[prev_index], rates[last_index], representative, expanded_zone))
+      return false;
+
+   return IsM15ImbalanceConfirmationPassed(orderType, rates, copied, last_index);
+  }
+
+//+------------------------------------------------------------------+
+//| M15平均レンジを計算する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief M15確定足の平均レンジを計算します。
+ *
+ * @param rates M15のMqlRates配列。
+ * @param count 使用する本数。
+ * @return 平均レンジ。算出不能な場合は最小ゾーン幅を返します。
+ */
+double AverageM15Range(const MqlRates &rates[], const int count)
+  {
+   double total_range = 0.0;
+   int used = 0;
+
+   for(int i = 0; i < count; i++)
+     {
+      double range = rates[i].high - rates[i].low;
+      if(range <= 0.0)
+         continue;
+
+      total_range += range;
+      used++;
+     }
+
+   if(used <= 0)
+      return M15_MIN_ENTRY_ZONE_POINTS * Point();
+
+   return total_range / used;
+  }
+
+//+------------------------------------------------------------------+
+//| M15平均実体を計算する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 判定対象足を含めず、直前N本のM15平均実体サイズを返します。
+ *
+ * @param rates M15のMqlRates配列。
+ * @param current_index 判定対象の配列index。
+ * @param period 平均計算本数。
+ * @return 平均実体サイズ。算出不能な場合は0。
+ */
+double AverageM15BodySize(const MqlRates &rates[], const int current_index, const int period)
+  {
+   if(period <= 0)
+      return 0.0;
+   if(current_index < period)
+      return 0.0;
+
+   double total_body = 0.0;
+   for(int i = current_index - period; i < current_index; i++)
+      total_body += MathAbs(rates[i].close - rates[i].open);
+
+   return total_body / period;
+  }
+
+//+------------------------------------------------------------------+
+//| M15初動確認を行う注文タイプか判定する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 初動フォローの追加確認を適用する注文タイプを返します。
+ */
+bool RequiresM15ImbalanceConfirmation(const int orderType)
+  {
+   return IsTrendStopOrderType(orderType);
+  }
+
+//+------------------------------------------------------------------+
+//| M15インバランス初動確認
+//+------------------------------------------------------------------+
+/**
+ * @brief T1/T3順張り注文に対してM15確定足の初動またはブレイクを確認します。
+ *
+ * H1/Pythonで決めた方向は上書きせず、発注直前にM15の方向一致と勢いだけを確認します。
+ */
+bool IsM15ImbalanceConfirmationPassed(const int orderType, const MqlRates &rates[], const int count, const int current_index)
+  {
+   if(!use_m15_imbalance_confirmation)
+      return true;
+   if(!RequiresM15ImbalanceConfirmation(orderType))
+      return true;
+
+   if(m15_imbalance_avg_body_period <= 0 || m15_imbalance_sensitivity <= 0.0)
+     {
+      Print("[M15 Imbalance] invalid settings. period=", m15_imbalance_avg_body_period,
+            " sensitivity=", m15_imbalance_sensitivity);
+      return false;
+     }
+
+   if(count <= m15_imbalance_avg_body_period || current_index <= 0)
+     {
+      Print("[M15 Imbalance] insufficient bars. copied=", count,
+            " period=", m15_imbalance_avg_body_period);
+      return false;
+     }
+
+   double avg_body = AverageM15BodySize(rates, current_index, m15_imbalance_avg_body_period);
+   double min_avg_body = m15_imbalance_min_avg_body_points * Point();
+   double current_body = MathAbs(rates[current_index].close - rates[current_index].open);
+
+   if(avg_body <= min_avg_body)
+     {
+      if(use_m15_imbalance_debug_log)
+         Print("[M15 Imbalance] average body too small. avg=", avg_body,
+               " min=", min_avg_body, " orderType=", orderType);
+      return false;
+     }
+
+   bool bullish = (rates[current_index].close > rates[current_index].open);
+   bool bearish = (rates[current_index].close < rates[current_index].open);
+   bool direction_ok = (orderType == 1 && bullish) || (orderType == 3 && bearish);
+   bool body_ok = (current_body > avg_body * m15_imbalance_sensitivity);
+   bool break_ok = false;
+
+   if(orderType == 1)
+      break_ok = (rates[current_index].close > rates[current_index - 1].high);
+   else if(orderType == 3)
+      break_ok = (rates[current_index].close < rates[current_index - 1].low);
+
+   bool passed = (direction_ok && (body_ok || break_ok));
+   if(use_m15_imbalance_debug_log)
+     {
+      Print("[M15 Imbalance] orderType=", orderType,
+            " avg_body=", avg_body,
+            " current_body=", current_body,
+            " sensitivity=", m15_imbalance_sensitivity,
+            " direction_ok=", direction_ok,
+            " body_ok=", body_ok,
+            " break_ok=", break_ok,
+            " passed=", passed);
+     }
+
+   return passed;
+  }
+
+//+------------------------------------------------------------------+
+//| 注文タイプごとのM15シグナル方向を判定する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 注文タイプごとにM15確定足の勢い・反転根拠を確認します。
+ *
+ * @param orderType 注文タイプ番号。
+ * @param prev_bar 1本前のM15確定足。
+ * @param last_bar 直近のM15確定足。
+ * @param en H1で決めたエントリー候補価格。
+ * @param entry_zone M15平均レンジから算出した候補価格付近の許容幅。
+ * @return 注文タイプに沿ったM15根拠があればtrue。
+ */
+bool IsM15SignalAligned(const int orderType, const MqlRates &prev_bar, const MqlRates &last_bar, const double en, const double entry_zone)
+  {
+   double range = SafeBarRange(last_bar);
+   double body_ratio = MathAbs(last_bar.close - last_bar.open) / range;
+   double upper_wick_ratio = (last_bar.high - MathMax(last_bar.open, last_bar.close)) / range;
+   double lower_wick_ratio = (MathMin(last_bar.open, last_bar.close) - last_bar.low) / range;
+
+   bool bullish = (last_bar.close > last_bar.open);
+   bool bearish = (last_bar.close < last_bar.open);
+   bool strong_body = (body_ratio >= M15_MIN_BODY_RATIO);
+   bool bullish_break = (last_bar.close > prev_bar.high);
+   bool bearish_break = (last_bar.close < prev_bar.low);
+   bool lower_rejection = (lower_wick_ratio >= M15_REJECTION_WICK_RATIO);
+   bool upper_rejection = (upper_wick_ratio >= M15_REJECTION_WICK_RATIO);
+
+   switch(orderType)
+     {
+      case 1: // Buy Stop: M15の上方向モメンタムを確認
+         return (bullish && (bullish_break || strong_body) && last_bar.close <= en + entry_zone);
+
+      case 2: // Buy Limit: 候補価格付近で下ヒゲ反転または買い戻しを確認
+         return (last_bar.low <= en + entry_zone && bullish &&
+                 (lower_rejection || bullish_break || strong_body));
+
+      case 3: // Sell Stop: M15の下方向モメンタムを確認
+         return (bearish && (bearish_break || strong_body) && last_bar.close >= en - entry_zone);
+
+      case 4: // Sell Limit: 候補価格付近で上ヒゲ反転または売り戻しを確認
+         return (last_bar.high >= en - entry_zone && bearish &&
+                 (upper_rejection || bearish_break || strong_body));
+
+      default:
+         return false;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| ローソク足レンジを安全に取得する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief ゼロ除算を避けるため、最小値を持つローソク足レンジを返します。
+ *
+ * @param bar 対象ローソク足。
+ * @return high-low。0以下の場合はPoint()を返します。
+ */
+double SafeBarRange(const MqlRates &bar)
+  {
+   double range = bar.high - bar.low;
+   if(range <= 0.0)
+      return Point();
+
+   return range;
+  }
+
+//+------------------------------------------------------------------+
+//| brokerの最小距離制約を満たすか判定する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief pending価格、TP、SLがstop level / freeze levelの最小距離を満たすか判定します。
+ *
+ * @param orderType 注文タイプ番号。
+ * @param ctx 現在のAsk/Bid情報。
+ * @param en エントリー価格。
+ * @param tp 利確価格。
+ * @param sl 損切価格。
+ * @return 最小距離を満たす場合はtrue。
+ */
+bool MeetsTradeDistanceRules(const int orderType, TickContext &ctx, const double en, const double tp, const double sl)
+  {
+   int stop_level = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   int freeze_level = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+   int min_level = stop_level;
+   if(freeze_level > min_level)
+      min_level = freeze_level;
+   double min_distance = min_level * Point();
+
+   if(min_distance <= 0.0)
+      return true;
+
+   double cur_price = CurrentPriceForOrderType(orderType, ctx);
+   string entry_type = EntryTypeName(orderType);
+
+   if(MathAbs(en - cur_price) < min_distance)
+     {
+      Print("[Skip] ", entry_type, " entry is too close. cur=", cur_price,
+            " en=", en, " min_distance=", min_distance);
+      return false;
+     }
+
+   if(MathAbs(tp - en) < min_distance)
+     {
+      Print("[Skip] ", entry_type, " TP is too close. en=", en,
+            " tp=", tp, " min_distance=", min_distance);
+      return false;
+     }
+
+   if(MathAbs(en - sl) < min_distance)
+     {
+      Print("[Skip] ", entry_type, " SL is too close. en=", en,
+            " sl=", sl, " min_distance=", min_distance);
+      return false;
+     }
+
+   return true;
+  }
+
+//+------------------------------------------------------------------+
+//| 注文送信結果に応じてリトライ状態を更新する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 注文送信結果に応じてエントリー判定のリトライ状態を更新します。
+ *
+ * @param state EA全体の状態。`chk_cnt` を更新します。
+ * @param sent_success 今回送信に成功した注文数。
+ *
+ * 注文が1件も送信されなかった場合、最大10回まで60秒間隔で再判定します。
+ */
+void UpdateEntryRetryState(EAState &state, const int sent_success)
+  {
+   if(sent_success > 0)
+     {
+      state.chk_cnt = 0;
+      return;
+     }
+
+   state.chk_cnt += 1;
+   Print("[Retry] no order sent. chk_cnt=", state.chk_cnt, "/", ENTRY_RETRY_LIMIT,
+         " (wait next M15 bar)");
+
+   if(state.chk_cnt < ENTRY_RETRY_LIMIT)
+     {
+      g_bars_H1_check = true;  // 次のM15確定足で再度エントリー判定を実行する
+      return;
+     }
+
+   Print("[Retry End] reached max tries. reset chk_cnt.");
+   state.chk_cnt = 0;
+  }
+
+
+#endif

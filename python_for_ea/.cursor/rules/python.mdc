@@ -1,0 +1,40 @@
+---
+description: python 関連ファイルを編集するときのルール
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python Instructions
+
+## Version / Environment
+
+- Python 3.13 を前提にする。
+- パッケージ管理と仮想環境管理には `uv` を使用する。
+
+## Type Hints
+
+- すべての関数に引数と戻り値の型ヒントを付ける。
+- `Any` は必要最小限にする。
+- `dict` / `list` は可能な限り具体的に型指定する。
+- 戻り値がない関数は `-> None` を明示する。
+
+## Path / File
+
+- `pathlib.Path` を使用する。
+- `os.path` は使用しない。
+- ファイル読み書きでは `encoding="utf-8"` を明示する。
+- パスを受け取る関数では、可能な限り `Path` 型を使用する。
+
+## Error Handling
+
+- 例外は握りつぶさない。
+- 原因を失わないように `raise ... from e` を使用する。
+- ユーザー表示用エラーと内部エラーを分離する。
+- 内部エラーは `logging` で記録する。
+
+## Design
+
+- UI、DB、I/O、ビジネスロジックを分離する。
+- 副作用のある処理は関数名から意図が分かるようにする。
+- magic number は定数化する。
+- 1つの関数に複数の責務を持たせない。

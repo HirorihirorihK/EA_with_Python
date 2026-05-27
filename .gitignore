@@ -1,0 +1,176 @@
+# ==============================================================================
+# MQL5 Project .gitignore
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Compiled Files (コンパイル済みファイル)
+# ------------------------------------------------------------------------------
+*.ex4
+*.ex5
+
+# ------------------------------------------------------------------------------
+# Logs and Temporary Files (ログと一時ファイル)
+# ------------------------------------------------------------------------------
+*.log
+Logs/
+*/Logs/
+
+# ------------------------------------------------------------------------------
+# Tester and Profiles (テスターとプロファイル)
+# ------------------------------------------------------------------------------
+Tester/
+*/Tester/
+Profiles/
+
+# ------------------------------------------------------------------------------
+# Runtime Generated Files (実行時生成ファイル)
+# ------------------------------------------------------------------------------
+Files/
+Images/
+
+# ------------------------------------------------------------------------------
+# Standard MT5 Folders (標準MT5フォルダ - 除外)
+# ------------------------------------------------------------------------------
+# Market downloads
+Market/
+*/Market/
+
+# Standard examples
+Examples/
+Experts/Examples/
+Indicators/Examples/
+Scripts/Examples/
+
+# Standard advisors
+Experts/Advisors/
+
+# Free robots and indicators
+Experts/Free Robots/
+Indicators/Free Indicators/
+
+# Standard libraries (Include配下の標準ライブラリは含めるが、サブフォルダのMarket等は除外)
+Include/*/Market/
+Include/*/Examples/
+
+# Services
+Services/
+
+# Shared Projects
+Shared Projects/
+
+# ------------------------------------------------------------------------------
+# Third-party Packages (サードパーティパッケージ)
+# ------------------------------------------------------------------------------
+# OANDA packages
+Indicators/oanda_basic_package/
+Indicators/oanda_lab/
+Indicators/oanda_lab_new/
+
+# Market indicators/experts (root level ex5 files)
+Indicators/*.ex5
+Experts/*.ex5
+
+# ------------------------------------------------------------------------------
+# Editor and IDE (エディタとIDE設定)
+# ------------------------------------------------------------------------------
+.history/
+.vscode/ipch/
+.vscode/msvc.json
+
+# ------------------------------------------------------------------------------
+# OS Specific (OS固有ファイル)
+# ------------------------------------------------------------------------------
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+experts.dat
+*.lnk
+
+# ------------------------------------------------------------------------------
+# Python Project (python_for_ea)
+# ------------------------------------------------------------------------------
+# Python bytecode and C extensions
+python_for_ea/**/__pycache__/
+python_for_ea/**/*.py[cod]
+python_for_ea/**/*$py.class
+python_for_ea/**/*.so
+
+# Virtual environments
+python_for_ea/**/.venv/
+python_for_ea/**/venv/
+python_for_ea/**/env/
+python_for_ea/**/ENV/
+
+# Environment variables
+python_for_ea/**/.env
+python_for_ea/**/.env.*
+!python_for_ea/**/.env.example
+
+# Python package and build outputs
+python_for_ea/**/build/
+python_for_ea/**/dist/
+python_for_ea/**/*.egg-info/
+python_for_ea/**/.eggs/
+python_for_ea/**/*.egg
+
+# Test, coverage, type-checker, and linter caches
+python_for_ea/**/.pytest_cache/
+python_for_ea/**/.coverage
+python_for_ea/**/.coverage.*
+python_for_ea/**/htmlcov/
+python_for_ea/**/.tox/
+python_for_ea/**/.nox/
+python_for_ea/**/.mypy_cache/
+python_for_ea/**/.pyright/
+python_for_ea/**/.ruff_cache/
+python_for_ea/**/.ty/
+
+# Jupyter, editor, local output, and database files
+python_for_ea/**/.ipynb_checkpoints/
+python_for_ea/**/.vscode/
+python_for_ea/**/.idea/
+python_for_ea/**/*.code-workspace
+python_for_ea/**/logs/
+python_for_ea/**/data/
+python_for_ea/**/output/
+python_for_ea/**/outputs/
+python_for_ea/**/tmp/
+python_for_ea/**/temp/
+python_for_ea/**/.cache/
+python_for_ea/**/*.db
+python_for_ea/**/*.sqlite
+python_for_ea/**/*.sqlite3
+python_for_ea/**/.streamlit/secrets.toml
+
+# Excel / Office temporary files
+python_for_ea/**/~$*.xlsx
+python_for_ea/**/~$*.xls
+python_for_ea/**/~$*.csv
+
+# uv.lock is intentionally not ignored so reproducible environments can be tracked.
+
+# ------------------------------------------------------------------------------
+# VS Code AI Rules (VSCode AI設定)
+# ------------------------------------------------------------------------------
+.github/instructions/codacy.instructions.md
+
+# ------------------------------------------------------------------------------
+# MQL Clangd Settings
+# ------------------------------------------------------------------------------
+.clangd
+.clang-format
+.cache/
+
+# ==============================================================================
+# Keep Custom Projects (自作プロジェクトは含める)
+# ==============================================================================
+# !Experts/YourProjectName/
+# !Indicators/YourProjectName/
+# !Include/MyLib/
+# !Scripts/Utilities/
+# !docs/
+# !README.md
+# !.github/copilot-instructions.md

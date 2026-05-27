@@ -1,0 +1,26 @@
+---
+description: setttings 関連ファイルを編集するときのルール
+globs: "**/settings.py,**/config/**/*.py,**/.env.example,**/*.env.example"
+alwaysApply: false
+---
+
+# Settings Instructions
+
+## Basic Rules
+
+- 設定は `pydantic_settings.BaseSettings` で一元管理する。
+- 開発環境は `.env.dev` を使用する。
+- テスト環境と本番環境はOS環境変数を使用する。
+- パス系の設定値は `pathlib.Path` で扱う。
+- DB接続情報、APIキー、パスワードをコードに直書きしない。
+
+## Naming
+
+- 環境変数のprefixはプロジェクト単位で統一する。
+- 例: `APP_`, `XXX1_`, `WEB_XXX1_`
+
+## Validation
+
+- 必須設定が不足した場合は、明確なValidationErrorとして扱う。
+- 設定の不足をデフォルト値で隠さない。
+- 本番用の秘密情報を `.env` ファイルに残さない。
