@@ -5,6 +5,7 @@ chcp 65001 >nul
 set PYTHONIOENCODING=utf-8
 set "APP_DIR=%~dp0.."
 set PY_FILE=get_entry_reply.py
+if not "%~1"=="" set "MT5_EA_FILE_PREFIX=%~1"
 for %%I in ("%APP_DIR%") do set "APP_DIR=%%~fI"
 
 cd /d "%APP_DIR%"

@@ -7,11 +7,16 @@ from pathlib import Path
 import pytest
 
 from ea_py.paths import (
+    ENV_MT5_EA_FILE_PREFIX,
     ENV_MT5_DATA_PATH,
     ENV_MT5_FILES_DIR,
     Mt5PathSettings,
+    build_entry_paths,
+    build_trend_paths,
     discover_mql5_dir,
     files_dir_from_data_path,
+    prefixed_file_name,
+    sanitize_file_prefix,
     terminal_files_dir,
 )
 
@@ -89,3 +94,44 @@ def test_terminal_files_dir_accepts_environment_data_path(
     actual = terminal_files_dir()
 
     assert actual == data_path / "MQL5" / "Files"
+
+
+def test_prefixed_file_name_uses_legacy_name_when_prefix_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """接頭辞未指定時は既存のMT5連携ファイル名を維持する。"""
+    monkeypatch.delenv(ENV_MT5_EA_FILE_PREFIX, raising=False)
+
+    assert prefixed_file_name("target_prices.txt") == "target_prices.txt"
+
+
+def test_sanitize_file_prefix_replaces_unsafe_characters() -> None:
+    """Symbols containing dots or suffixes are safe for filesystem names."""
+    assert sanitize_file_prefix("HIT_XAUUSD.pro_10001") == "HIT_XAUUSD_pro_10001"
+
+
+def test_build_paths_apply_file_prefix_from_settings(tmp_path: Path) -> None:
+    """同一Files配下でEAごとの連携ファイル名を分離できる。"""
+    settings = Mt5PathSettings(files_dir=tmp_path, file_prefix="HIT_GOLD_10001")
+
+    trend_paths = build_trend_paths(settings)
+    entry_paths = build_entry_paths(settings)
+
+    assert trend_paths.input_csv == tmp_path / "HIT_GOLD_10001_ohlc_H4.csv"
+    assert trend_paths.trend_state == tmp_path / "HIT_GOLD_10001_trend_state.txt"
+    assert entry_paths.input_csv == tmp_path / "HIT_GOLD_10001_ohlc_H1.csv"
+    assert entry_paths.output_prices == tmp_path / "HIT_GOLD_10001_target_prices.txt"
+    assert entry_paths.output_zones == tmp_path / "HIT_GOLD_10001_target_zones.txt"
+
+
+def test_build_paths_apply_file_prefix_from_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """batから渡されたMT5_EA_FILE_PREFIXでPython側ファイル名を合わせる。"""
+    monkeypatch.setenv(ENV_MT5_FILES_DIR, str(tmp_path))
+    monkeypatch.setenv(ENV_MT5_EA_FILE_PREFIX, "HIT_GOLD_10001")
+
+    actual = build_entry_paths()
+
+    assert actual.done_entry == tmp_path / "HIT_GOLD_10001_process_done_entry.txt"

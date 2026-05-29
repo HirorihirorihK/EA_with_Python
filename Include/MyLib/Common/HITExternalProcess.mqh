@@ -308,7 +308,11 @@ string BatchWorkingDirectory(const string bat_file)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool StartBatchProcess(const string bat_file, const string running_file, const string label, ExternalProcessState &process)
+bool StartBatchProcess(const string bat_file,
+                       const string running_file,
+                       const string label,
+                       ExternalProcessState &process,
+                       const string file_prefix)
   {
    STARTUPINFO_W startup_info = {};
    PROCESS_INFORMATION process_info = {};
@@ -316,7 +320,7 @@ bool StartBatchProcess(const string bat_file, const string running_file, const s
    startup_info.cb = (uint)sizeof(startup_info);
 
    string cmd_exe = "C:\\Windows\\System32\\cmd.exe";
-   string command_line = "\"" + cmd_exe + "\" /c \"\"" + bat_file + "\"\"";
+   string command_line = "\"" + cmd_exe + "\" /c \"\"" + bat_file + "\" \"" + file_prefix + "\"\"";
    string current_directory = BatchWorkingDirectory(bat_file);
 
    int created = CreateProcessW(
@@ -353,7 +357,7 @@ bool StartBatchProcess(const string bat_file, const string running_file, const s
 
    CreateRunningFile(running_file, process.process_id);
    Print("[", label, "] process started. pid=", process.process_id,
-         " file=", bat_file, " cwd=", current_directory);
+         " file=", bat_file, " cwd=", current_directory, " prefix=", file_prefix);
    return true;
   }
 

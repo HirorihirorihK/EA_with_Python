@@ -35,9 +35,11 @@ MT5 EAから `bat/` 経由でルート直下のPythonスクリプトが呼ばれ
 │     │  └─ candlestick.py
 │     ├─ market/
 │     │  ├─ __init__.py
+│     │  ├─ imbalance.py
+│     │  ├─ target_prices.py
+│     │  ├─ target_zones.py
 │     │  ├─ volatility.py
-│     │  ├─ trend_state.py
-│     │  └─ target_prices.py
+│     │  └─ trend_state.py
 │     ├─ prompts/
 │     │  ├─ __init__.py
 │     │  ├─ trend_prompt.py
@@ -49,8 +51,12 @@ MT5 EAから `bat/` 経由でルート直下のPythonスクリプトが呼ばれ
 │        └─ entry_pipeline.py
 ├─ tests/
 │  └─ unit/
-│     ├─ test_trend_state.py
+│     ├─ test_config.py
+│     ├─ test_imbalance.py
+│     ├─ test_openai_client.py
+│     ├─ test_paths.py
 │     ├─ test_target_prices.py
+│     ├─ test_trend_state.py
 │     └─ test_volatility.py
 ├─ bat/
 │  ├─ get_trend_reply.bat
@@ -86,23 +92,26 @@ MT5 EAから `bat/` 経由でルート直下のPythonスクリプトが呼ばれ
 
 MT5側の `MQL5\Files` 配下に、Pythonとの連携ファイルが置かれる。
 
+EA/bat経由では `HIT_<symbol>_<magic_number>` 形式の接頭辞が `MT5_EA_FILE_PREFIX` としてPythonへ渡され、すべての連携ファイル名へ付与される。接頭辞が未設定の手動実行では旧ファイル名を維持する。
+
 代表例:
 
 ```text
 C:/Users/new/AppData/Roaming/MetaQuotes/Terminal/{terminal_ID}/MQL5/Files/
-├─ ohlc_H4.csv
-├─ ohlc_H1.csv
-├─ trend_state.txt
-├─ target_prices.txt
-├─ process_done_trend.txt
-├─ process_done_entry.txt
-├─ process_running_trend.txt
-├─ process_running_entry.txt
-├─ debug_trend.txt
-├─ debug_entry.txt
-├─ tmp_chart_trend.png
-├─ tmp_chart_short.png
-└─ tmp_chart_long.png
+├─ HIT_GOLD_10001_ohlc_H4.csv
+├─ HIT_GOLD_10001_ohlc_H1.csv
+├─ HIT_GOLD_10001_trend_state.txt
+├─ HIT_GOLD_10001_target_prices.txt
+├─ HIT_GOLD_10001_target_zones.txt
+├─ HIT_GOLD_10001_process_done_trend.txt
+├─ HIT_GOLD_10001_process_done_entry.txt
+├─ HIT_GOLD_10001_process_running_trend.txt
+├─ HIT_GOLD_10001_process_running_entry.txt
+├─ HIT_GOLD_10001_debug_trend.txt
+├─ HIT_GOLD_10001_debug_entry.txt
+├─ HIT_GOLD_10001_tmp_chart_trend.png
+├─ HIT_GOLD_10001_tmp_chart_short.png
+└─ HIT_GOLD_10001_tmp_chart_long.png
 ```
 
 これらは実行時生成物であり、原則として `MQL5\python_for_ea` 配下へコピーして正本化しない。
@@ -115,7 +124,7 @@ MQL5 EAファイルは、MT5データフォルダ配下に存在する。
 
 ```text
 C:/Users/new/AppData/Roaming/MetaQuotes/Terminal/{terminal_ID}/MQL5/Experts/MyProject/
-└─ HIT-EA_refactor_ver3.mq5
+└─ HIT-EA_refactor_ver6.mq5
 ```
 
 EAファイルはこのPythonプロジェクトの外部連携先として扱う。Python側の出力形式を変更する場合は、EA側の読込処理も同時に確認する。
@@ -154,9 +163,11 @@ EAファイルはこのPythonプロジェクトの外部連携先として扱う
 │     │  └─ candlestick.py
 │     ├─ market/
 │     │  ├─ __init__.py
+│     │  ├─ imbalance.py
+│     │  ├─ target_prices.py
+│     │  ├─ target_zones.py
 │     │  ├─ volatility.py
-│     │  ├─ trend_state.py
-│     │  └─ target_prices.py
+│     │  └─ trend_state.py
 │     ├─ prompts/
 │     │  ├─ __init__.py
 │     │  ├─ trend_prompt.py
@@ -168,8 +179,12 @@ EAファイルはこのPythonプロジェクトの外部連携先として扱う
 │        └─ entry_pipeline.py
 ├─ tests/
 │  └─ unit/
-│     ├─ test_trend_state.py
+│     ├─ test_config.py
+│     ├─ test_imbalance.py
+│     ├─ test_openai_client.py
+│     ├─ test_paths.py
 │     ├─ test_target_prices.py
+│     ├─ test_trend_state.py
 │     └─ test_volatility.py
 └─ docs/
    ├─ architecture/
@@ -193,6 +208,8 @@ EAファイルはこのPythonプロジェクトの外部連携先として扱う
 | `src/ea_py/market/volatility.py` | True Range、Exponential ATR、ボラティリティ分類。 |
 | `src/ea_py/market/trend_state.py` | H4方向判定結果とボラティリティ分類の合成。 |
 | `src/ea_py/market/target_prices.py` | GPT出力のパース、価格整合性チェック、13行形式への変換。 |
+| `src/ea_py/market/target_zones.py` | GPT出力の予測ゾーンを分割エントリー用7行形式へ変換。 |
+| `src/ea_py/market/imbalance.py` | H1インバランス初動判定。 |
 | `src/ea_py/prompts/trend_prompt.py` | H4相場環境判定プロンプトの生成。 |
 | `src/ea_py/prompts/entry_prompt.py` | H1候補価格生成プロンプトの生成。 |
 | `src/ea_py/openai_client.py` | OpenAI API呼び出しの薄いラッパー。 |

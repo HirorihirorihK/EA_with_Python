@@ -370,9 +370,7 @@ bool HasExistingSplitSlot(const string slot_key)
 bool CancelStaleSplitPendingOrders(const string current_candidate_id)
   {
    bool result = false;
-
-   if(current_candidate_id == "" || current_candidate_id == "0")
-      return false;
+   bool keep_current_candidate = (current_candidate_id != "" && current_candidate_id != "0");
 
    for(int i = OrdersTotal() - 1; i >= 0; i--)
      {
@@ -389,7 +387,7 @@ bool CancelStaleSplitPendingOrders(const string current_candidate_id)
       string comment = OrderGetString(ORDER_COMMENT);
       if(!IsSplitOrderComment(comment))
          continue;
-      if(IsCurrentSplitCandidateComment(comment, current_candidate_id))
+      if(keep_current_candidate && IsCurrentSplitCandidateComment(comment, current_candidate_id))
          continue;
 
       MqlTradeRequest request = {};

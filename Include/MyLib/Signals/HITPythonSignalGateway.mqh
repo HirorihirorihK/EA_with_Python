@@ -120,6 +120,101 @@ bool RecordOHLC(const string filename, const datetime &times[], const double &op
   }
 
 //+------------------------------------------------------------------+
+//| 文字列の前後空白を除去する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief Python連携ファイルから読んだ1行をパース前に正規化します。
+ */
+string TrimText(const string value)
+  {
+   string text = value;
+   StringTrimLeft(text);
+   StringTrimRight(text);
+   return text;
+  }
+
+//+------------------------------------------------------------------+
+//| 10進数字か判定する関数
+//+------------------------------------------------------------------+
+bool IsDecimalDigit(const int ch)
+  {
+   return (ch >= 48 && ch <= 57);
+  }
+
+//+------------------------------------------------------------------+
+//| 厳格な整数パース
+//+------------------------------------------------------------------+
+/**
+ * @brief 数字だけで構成された整数行を読み込みます。不正文字があればfalse。
+ */
+bool TryParseStrictInteger(const string value, int &parsed)
+  {
+   string text = TrimText(value);
+   int length = StringLen(text);
+   if(length <= 0)
+      return false;
+
+   for(int i = 0; i < length; i++)
+     {
+      if(!IsDecimalDigit(StringGetCharacter(text, i)))
+         return false;
+     }
+
+   parsed = (int)StringToInteger(text);
+   return true;
+  }
+
+//+------------------------------------------------------------------+
+//| 厳格な小数パース
+//+------------------------------------------------------------------+
+/**
+ * @brief 単純な10進数行を読み込みます。指数表記や余計な文字は許可しません。
+ */
+bool TryParseStrictDouble(const string value, double &parsed)
+  {
+   string text = TrimText(value);
+   int length = StringLen(text);
+   if(length <= 0)
+      return false;
+
+   bool has_digit = false;
+   bool has_dot = false;
+   int start_index = 0;
+
+   int first_char = StringGetCharacter(text, 0);
+   if(first_char == 43 || first_char == 45) // + or -
+     {
+      if(length == 1)
+         return false;
+      start_index = 1;
+     }
+
+   for(int i = start_index; i < length; i++)
+     {
+      int ch = StringGetCharacter(text, i);
+      if(IsDecimalDigit(ch))
+        {
+         has_digit = true;
+         continue;
+        }
+
+      if(ch == 46 && !has_dot) // dot
+        {
+         has_dot = true;
+         continue;
+        }
+
+      return false;
+     }
+
+   if(!has_digit)
+      return false;
+
+   parsed = StringToDouble(text);
+   return true;
+  }
+
+//+------------------------------------------------------------------+
 //| バッチファイル（Pythonスクリプト）を実行する関数
 //+------------------------------------------------------------------+
 /**
@@ -135,7 +230,7 @@ bool ExecuteBatchTrend()
       return false;
 
    DeleteDoneFile(done_trend_file);
-   return StartBatchProcess(get_trend_reply_bat, running_trend_file, "trend", g_trend_process);
+   return StartBatchProcess(get_trend_reply_bat, running_trend_file, "trend", g_trend_process, mt5_file_prefix);
   }
 
 //+------------------------------------------------------------------+
@@ -154,7 +249,7 @@ bool ExecuteBatchEntry()
       return false;
 
    DeleteDoneFile(done_entry_file);
-   return StartBatchProcess(get_entry_reply_bat, running_entry_file, "entry", g_entry_process);
+   return StartBatchProcess(get_entry_reply_bat, running_entry_file, "entry", g_entry_process, mt5_file_prefix);
   }
 
 
@@ -182,7 +277,7 @@ bool RecordOHLCAndExecuteBatch_Trend(EAState &state)
                      PERIOD_H4, HISTORY_BARS))
      { Print("GetLatestOHLC(H4) failed."); return false; }
 
-   if(!RecordOHLC("ohlc_H4.csv", times, open_prices, high_prices, low_prices, close_prices))
+   if(!RecordOHLC(ohlc_h4_file, times, open_prices, high_prices, low_prices, close_prices))
      { Print("RecordOHLC(H4) failed."); return false; }
 
    if(!ExecuteBatchTrend())
@@ -216,7 +311,7 @@ bool RecordOHLCAndExecuteBatch_Entry(EAState &state)
                      PERIOD_H1, HISTORY_BARS))
      { Print("GetLatestOHLC(H1) failed."); return false; }
 
-   if(!RecordOHLC("ohlc_H1.csv", times, open_prices, high_prices, low_prices, close_prices))
+   if(!RecordOHLC(ohlc_h1_file, times, open_prices, high_prices, low_prices, close_prices))
      { Print("RecordOHLC(H1) failed."); return false; }
 
    if(!ExecuteBatchEntry())
@@ -272,8 +367,9 @@ void LoadTrendState(int &trend_state)
       if(filehandle != INVALID_HANDLE)
         {
          string line = FileReadString(filehandle);
-         int value = (int)StringToInteger(line);
-         if(value >= MARKET_LOW_VOL_RANGE && value <= MARKET_TECHNICAL_ERROR_STOP)
+         int value = MARKET_TECHNICAL_ERROR_STOP;
+         if(TryParseStrictInteger(line, value) &&
+            value >= MARKET_LOW_VOL_RANGE && value <= MARKET_TECHNICAL_ERROR_STOP)
             trend_state = value;
          else
             Print("Invalid market_state value: ", line, ". Use technical error stop(6).");
@@ -325,8 +421,13 @@ bool GetTargetPrices(EAState &state)
             " | T4 en=", state.en_price[4], " tp=", state.tp_price[4], " sl=", state.sl_price[4]);
 
       LoadTargetZones(state);
-      if(use_split_entry_zone && cancel_old_split_pending_on_new_zone && state.zone_res_chk == 1)
-         CancelStaleSplitPendingOrders(state.zone_candidate_id);
+      if(use_split_entry_zone && cancel_old_split_pending_on_new_zone)
+        {
+         if(state.zone_res_chk == 1)
+            CancelStaleSplitPendingOrders(state.zone_candidate_id);
+         else
+            CancelStaleSplitPendingOrders("");
+        }
 
       g_ea.load_target_flg = false;                    // ←変更
       g_ea.last_target_update = TimeLocal();           // ←変更
@@ -359,17 +460,29 @@ void LoadTargetPrices(double &target_prices[])
       if(filehandle != INVALID_HANDLE)
         {
          int i = 0;
+         bool parse_failed = false;
          while(!FileIsEnding(filehandle) && i < TARGET_SIZE)
            {
             string line = FileReadString(filehandle);
-            target_prices[i] = StringToDouble(line);
+            double parsed = 0.0;
+            if(!TryParseStrictDouble(line, parsed))
+              {
+               Print("target_prices.txt invalid numeric line. index=", i, " line=", line);
+               parse_failed = true;
+               break;
+              }
+
+            target_prices[i] = parsed;
             i++;
            }
          FileClose(filehandle);
 
-         if(i < TARGET_SIZE)
+         if(parse_failed || i < TARGET_SIZE)
            {
-            Print("target_prices.txt line count is short. loaded=", i, " required=", TARGET_SIZE);
+            if(!parse_failed)
+               Print("target_prices.txt line count is short. loaded=", i, " required=", TARGET_SIZE);
+            for(int j = 0; j < TARGET_SIZE; j++)
+               target_prices[j] = DEFAULT_TARGET_PRICE;
             target_prices[0] = 0; // 不完全なファイルは無効扱い
            }
         }
@@ -411,14 +524,26 @@ bool ParseTargetZoneLine(const string line, EAState &state, const int digits)
    if(count < 5)
       return false;
 
-   int strategy = (int)StringToInteger(parts[0]);
+   int strategy = 0;
+   if(!TryParseStrictInteger(parts[0], strategy))
+      return false;
    if(strategy < 1 || strategy > 4)
       return false;
 
-   state.zone_low[strategy] = NormalizeDouble(StringToDouble(parts[1]), digits);
-   state.zone_high[strategy] = NormalizeDouble(StringToDouble(parts[2]), digits);
-   state.zone_tp[strategy] = NormalizeDouble(StringToDouble(parts[3]), digits);
-   state.zone_sl[strategy] = NormalizeDouble(StringToDouble(parts[4]), digits);
+   double zone_low = 0.0;
+   double zone_high = 0.0;
+   double zone_tp = 0.0;
+   double zone_sl = 0.0;
+   if(!TryParseStrictDouble(parts[1], zone_low) ||
+      !TryParseStrictDouble(parts[2], zone_high) ||
+      !TryParseStrictDouble(parts[3], zone_tp) ||
+      !TryParseStrictDouble(parts[4], zone_sl))
+      return false;
+
+   state.zone_low[strategy] = NormalizeDouble(zone_low, digits);
+   state.zone_high[strategy] = NormalizeDouble(zone_high, digits);
+   state.zone_tp[strategy] = NormalizeDouble(zone_tp, digits);
+   state.zone_sl[strategy] = NormalizeDouble(zone_sl, digits);
    return true;
   }
 
@@ -456,10 +581,11 @@ void LoadTargetZones(EAState &state)
       line_index++;
       if(line_index == 1)
         {
-         int schema_version = (int)StringToInteger(line);
-         if(schema_version != TARGET_ZONE_SCHEMA_VERSION)
+         int schema_version = 0;
+         if(!TryParseStrictInteger(line, schema_version) ||
+            schema_version != TARGET_ZONE_SCHEMA_VERSION)
            {
-            Print("target_zones schema mismatch. loaded=", schema_version,
+            Print("target_zones schema mismatch. loaded=", line,
                   " required=", TARGET_ZONE_SCHEMA_VERSION);
             FileClose(filehandle);
             ResetTargetZones(state);
@@ -470,7 +596,16 @@ void LoadTargetZones(EAState &state)
 
       if(line_index == 2)
         {
-         state.zone_res_chk = (int)StringToInteger(line);
+         int zone_res = 0;
+         if(!TryParseStrictInteger(line, zone_res))
+           {
+            Print("target_zones invalid res_chk line: ", line);
+            FileClose(filehandle);
+            ResetTargetZones(state);
+            return;
+           }
+
+         state.zone_res_chk = zone_res;
          continue;
         }
 

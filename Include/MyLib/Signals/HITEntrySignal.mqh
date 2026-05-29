@@ -671,7 +671,7 @@ bool IsM15EntryTimingConfirmed(const int orderType, TickContext &ctx, const doub
    if(!use_m15_entry_filter)
       return true;
 
-   if(IsTrendStopOrderType(orderType))
+   if(IsTrendStopOrderType(orderType) && !use_m15_imbalance_confirmation)
       return true;
 
    MqlRates rates[];
@@ -684,6 +684,9 @@ bool IsM15EntryTimingConfirmed(const int orderType, TickContext &ctx, const doub
 
    int last_index = copied - 1;
    int prev_index = copied - 2;
+
+   if(IsTrendStopOrderType(orderType))
+      return IsM15ImbalanceConfirmationPassed(orderType, rates, copied, last_index);
 
    double avg_range = AverageM15Range(rates, copied);
    double min_zone = M15_MIN_ENTRY_ZONE_POINTS * Point();
@@ -719,7 +722,7 @@ bool IsM15ZoneTimingConfirmed(const int orderType,
    if(!use_m15_entry_filter)
       return true;
 
-   if(IsTrendStopOrderType(orderType))
+   if(IsTrendStopOrderType(orderType) && !use_m15_imbalance_confirmation)
       return true;
 
    MqlRates rates[];
@@ -732,6 +735,9 @@ bool IsM15ZoneTimingConfirmed(const int orderType,
 
    int last_index = copied - 1;
    int prev_index = copied - 2;
+
+   if(IsTrendStopOrderType(orderType))
+      return IsM15ImbalanceConfirmationPassed(orderType, rates, copied, last_index);
 
    double avg_range = AverageM15Range(rates, copied);
    double min_zone = M15_MIN_ENTRY_ZONE_POINTS * Point();
