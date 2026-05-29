@@ -215,6 +215,71 @@ bool TryParseStrictDouble(const string value, double &parsed)
   }
 
 //+------------------------------------------------------------------+
+//| H1候補IDを安全な12桁時刻トークンへ正規化する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief Pythonから受け取ったcandidate_idを注文コメントに使える数字だけへ丸めます。
+ */
+string NormalizeTargetCandidateId(const string value)
+  {
+   string text = TrimText(value);
+   string output = "";
+   int length = StringLen(text);
+
+   for(int i = 0; i < length && StringLen(output) < 12; i++)
+     {
+      int ch = StringGetCharacter(text, i);
+      if(IsDecimalDigit(ch))
+         output += StringSubstr(text, i, 1);
+     }
+
+   if(StringLen(output) <= 0)
+      return "0";
+
+   return output;
+  }
+
+//+------------------------------------------------------------------+
+//| H1候補IDから確定足時刻を復元する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief `yyyyMMddHHmm` 形式のcandidate_idをdatetimeへ変換します。
+ */
+bool TryParseTargetCandidateTime(const string candidate_id, datetime &candidate_at)
+  {
+   candidate_at = 0;
+   string text = NormalizeTargetCandidateId(candidate_id);
+   if(StringLen(text) != 12)
+      return false;
+
+   int year = (int)StringToInteger(StringSubstr(text, 0, 4));
+   int month = (int)StringToInteger(StringSubstr(text, 4, 2));
+   int day = (int)StringToInteger(StringSubstr(text, 6, 2));
+   int hour = (int)StringToInteger(StringSubstr(text, 8, 2));
+   int minute = (int)StringToInteger(StringSubstr(text, 10, 2));
+
+   if(year < 2000 || month < 1 || month > 12 ||
+      day < 1 || day > 31 || hour < 0 || hour > 23 ||
+      minute < 0 || minute > 59)
+      return false;
+
+   string datetime_text = StringFormat("%04d.%02d.%02d %02d:%02d",
+                                       year, month, day, hour, minute);
+   datetime parsed = StringToTime(datetime_text);
+   if(parsed <= 0)
+      return false;
+
+   MqlDateTime parts;
+   TimeToStruct(parsed, parts);
+   if(parts.year != year || parts.mon != month || parts.day != day ||
+      parts.hour != hour || parts.min != minute)
+      return false;
+
+   candidate_at = parsed;
+   return true;
+  }
+
+//+------------------------------------------------------------------+
 //| バッチファイル（Pythonスクリプト）を実行する関数
 //+------------------------------------------------------------------+
 /**
@@ -230,7 +295,9 @@ bool ExecuteBatchTrend()
       return false;
 
    DeleteDoneFile(done_trend_file);
-   return StartBatchProcess(get_trend_reply_bat, running_trend_file, "trend", g_trend_process, mt5_file_prefix);
+   int price_digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+   return StartBatchProcess(get_trend_reply_bat, running_trend_file, "trend",
+                            g_trend_process, mt5_file_prefix, price_digits);
   }
 
 //+------------------------------------------------------------------+
@@ -249,7 +316,9 @@ bool ExecuteBatchEntry()
       return false;
 
    DeleteDoneFile(done_entry_file);
-   return StartBatchProcess(get_entry_reply_bat, running_entry_file, "entry", g_entry_process, mt5_file_prefix);
+   int price_digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+   return StartBatchProcess(get_entry_reply_bat, running_entry_file, "entry",
+                            g_entry_process, mt5_file_prefix, price_digits);
   }
 
 
@@ -504,6 +573,7 @@ void ResetTargetZones(EAState &state)
   {
    state.zone_res_chk = 0;
    state.zone_candidate_id = "0";
+   state.target_candidate_at = 0;
 
    for(int t = 1; t <= 4; t++)
      {
@@ -611,7 +681,12 @@ void LoadTargetZones(EAState &state)
 
       if(line_index == 3)
         {
-         state.zone_candidate_id = line;
+         state.zone_candidate_id = NormalizeTargetCandidateId(line);
+         datetime candidate_at = 0;
+         if(TryParseTargetCandidateTime(state.zone_candidate_id, candidate_at))
+            state.target_candidate_at = candidate_at;
+         else
+            state.target_candidate_at = 0;
          continue;
         }
 
@@ -634,6 +709,7 @@ void LoadTargetZones(EAState &state)
 
    Print("target_zones: res=", state.zone_res_chk,
          " id=", state.zone_candidate_id,
+         " candidate_at=", TimeToString(state.target_candidate_at, TIME_DATE | TIME_MINUTES),
          " | T1 zone=", state.zone_low[1], "-", state.zone_high[1],
          " tp=", state.zone_tp[1], " sl=", state.zone_sl[1],
          " | T2 zone=", state.zone_low[2], "-", state.zone_high[2],

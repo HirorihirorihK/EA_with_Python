@@ -10,13 +10,16 @@ from ea_py.paths import (
     ENV_MT5_EA_FILE_PREFIX,
     ENV_MT5_DATA_PATH,
     ENV_MT5_FILES_DIR,
+    ENV_MT5_PRICE_DIGITS,
     Mt5PathSettings,
     build_entry_paths,
     build_trend_paths,
     discover_mql5_dir,
     files_dir_from_data_path,
+    mt5_price_digits,
     prefixed_file_name,
     sanitize_file_prefix,
+    sanitize_price_digits,
     terminal_files_dir,
 )
 
@@ -135,3 +138,25 @@ def test_build_paths_apply_file_prefix_from_environment(
     actual = build_entry_paths()
 
     assert actual.done_entry == tmp_path / "HIT_GOLD_10001_process_done_entry.txt"
+
+
+def test_sanitize_price_digits_accepts_mt5_symbol_digits() -> None:
+    """MT5のSYMBOL_DIGITSは安全な範囲だけ受け入れる。"""
+    assert sanitize_price_digits("3") == 3
+    assert sanitize_price_digits(10) == 10
+    assert sanitize_price_digits("-1") is None
+    assert sanitize_price_digits("abc") is None
+
+
+def test_mt5_price_digits_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """EA/batから渡された価格桁数をPython側で参照できる。"""
+    monkeypatch.setenv(ENV_MT5_PRICE_DIGITS, "3")
+
+    assert mt5_price_digits() == 3
+
+
+def test_mt5_price_digits_accepts_settings() -> None:
+    """テストや手動実行では設定オブジェクトから価格桁数を渡せる。"""
+    settings = Mt5PathSettings(price_digits=2)
+
+    assert mt5_price_digits(settings) == 2

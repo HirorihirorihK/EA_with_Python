@@ -12,6 +12,7 @@ DEFAULT_TERMINAL_ID = "5BDB0B60344C088C2FA5CA35699BAAFD"
 ENV_MT5_FILES_DIR = "MT5_FILES_DIR"
 ENV_MT5_DATA_PATH = "MT5_DATA_PATH"
 ENV_MT5_EA_FILE_PREFIX = "MT5_EA_FILE_PREFIX"
+ENV_MT5_PRICE_DIGITS = "MT5_PRICE_DIGITS"
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class Mt5PathSettings:
     user_name: str | None = None
     terminal_id: str | None = None
     file_prefix: str | None = None
+    price_digits: int | None = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +103,30 @@ def prefixed_file_name(base_name: str, settings: Mt5PathSettings | None = None) 
         return base_name
 
     return f"{prefix}_{base_name}"
+
+
+def sanitize_price_digits(value: int | str | None) -> int | None:
+    """MT5から渡された価格桁数を安全な範囲へ丸める。"""
+    if value is None:
+        return None
+
+    try:
+        digits = int(value)
+    except (TypeError, ValueError):
+        return None
+
+    if 0 <= digits <= 10:
+        return digits
+
+    return None
+
+
+def mt5_price_digits(settings: Mt5PathSettings | None = None) -> int | None:
+    """MT5連携価格の小数桁数を返す。未指定や不正値はNone。"""
+    if settings and settings.price_digits is not None:
+        return sanitize_price_digits(settings.price_digits)
+
+    return sanitize_price_digits(os.getenv(ENV_MT5_PRICE_DIGITS))
 
 
 def terminal_files_dir(settings: Mt5PathSettings | None = None) -> Path:

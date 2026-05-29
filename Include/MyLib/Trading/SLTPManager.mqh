@@ -335,8 +335,9 @@ public:
                 continue;
 
             double candidate_sl = 0.0;
+            const double evaluation_price = (type == POSITION_TYPE_BUY) ? tick.bid : tick.ask;
             if (!CalcHighVolatilitySL(type,
-                                      tick.bid,
+                                      evaluation_price,
                                       open_m1,
                                       open_m3,
                                       open_m5,
@@ -381,7 +382,10 @@ private:
     /// @details GOLD/XAUUSD は 0.1、2/3桁は0.01、4/5桁は0.0001を1 pipとして扱う。
     double PipSize()
     {
-        if (m_symbol == "XAUUSD" || m_symbol == "GOLD")
+        string normalized_symbol = m_symbol;
+        StringToUpper(normalized_symbol);
+        if (StringFind(normalized_symbol, "XAUUSD") >= 0 ||
+            StringFind(normalized_symbol, "GOLD") >= 0)
             return 0.1;
 
         const int digits = (int)SymbolInfoInteger(m_symbol, SYMBOL_DIGITS);
@@ -585,7 +589,7 @@ private:
     /// @brief 高ボラティリティ判定に基づくSL候補を計算する。
     /// @return いずれかの時間足でしきい値を超え、SL候補を出力した場合は true。
     bool CalcHighVolatilitySL(const ENUM_POSITION_TYPE type,
-                              const double current_bid,
+                              const double current_price,
                               const double open_m1,
                               const double open_m3,
                               const double open_m5,
@@ -599,11 +603,11 @@ private:
         double candidate_sl = 0.0;
         const double rate_ratio = 0.9;
 
-        EvaluateHighVolatilityOpen(type, current_bid, open_m1, 100.0, rate_ratio, pip_size, digits, has_candidate, candidate_sl);
-        EvaluateHighVolatilityOpen(type, current_bid, open_m3, 150.0, rate_ratio, pip_size, digits, has_candidate, candidate_sl);
-        EvaluateHighVolatilityOpen(type, current_bid, open_m5, 200.0, rate_ratio, pip_size, digits, has_candidate, candidate_sl);
-        EvaluateHighVolatilityOpen(type, current_bid, open_m10, 300.0, rate_ratio, pip_size, digits, has_candidate, candidate_sl);
-        EvaluateHighVolatilityOpen(type, current_bid, open_m15, 400.0, rate_ratio, pip_size, digits, has_candidate, candidate_sl);
+        EvaluateHighVolatilityOpen(type, current_price, open_m1, 100.0, rate_ratio, pip_size, digits, has_candidate, candidate_sl);
+        EvaluateHighVolatilityOpen(type, current_price, open_m3, 150.0, rate_ratio, pip_size, digits, has_candidate, candidate_sl);
+        EvaluateHighVolatilityOpen(type, current_price, open_m5, 200.0, rate_ratio, pip_size, digits, has_candidate, candidate_sl);
+        EvaluateHighVolatilityOpen(type, current_price, open_m10, 300.0, rate_ratio, pip_size, digits, has_candidate, candidate_sl);
+        EvaluateHighVolatilityOpen(type, current_price, open_m15, 400.0, rate_ratio, pip_size, digits, has_candidate, candidate_sl);
 
         if (!has_candidate)
             return false;
@@ -614,7 +618,7 @@ private:
 
     /// @brief 1本の時間足始値から急変幅を評価し、有効なSL候補なら最良候補へ反映する。
     void EvaluateHighVolatilityOpen(const ENUM_POSITION_TYPE type,
-                                    const double current_bid,
+                                    const double current_price,
                                     const double open_price,
                                     const double limit_pips,
                                     const double rate_ratio,
@@ -631,12 +635,12 @@ private:
 
         if (type == POSITION_TYPE_BUY)
         {
-            movement_pips = (current_bid - open_price) / pip_size;
+            movement_pips = (current_price - open_price) / pip_size;
             sl_value = open_price + limit_pips * rate_ratio * pip_size;
         }
         else if (type == POSITION_TYPE_SELL)
         {
-            movement_pips = (open_price - current_bid) / pip_size;
+            movement_pips = (open_price - current_price) / pip_size;
             sl_value = open_price - limit_pips * rate_ratio * pip_size;
         }
         else

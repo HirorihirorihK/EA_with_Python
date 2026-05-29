@@ -92,7 +92,7 @@ MT5 EAから `bat/` 経由でルート直下のPythonスクリプトが呼ばれ
 
 MT5側の `MQL5\Files` 配下に、Pythonとの連携ファイルが置かれる。
 
-EA/bat経由では `HIT_<symbol>_<magic_number>` 形式の接頭辞が `MT5_EA_FILE_PREFIX` としてPythonへ渡され、すべての連携ファイル名へ付与される。接頭辞が未設定の手動実行では旧ファイル名を維持する。
+EA/bat経由では `HIT_<symbol>_<magic_number>` 形式の接頭辞が `MT5_EA_FILE_PREFIX` としてPythonへ渡され、すべての連携ファイル名へ付与される。さらに `_Symbol` の価格桁数が `MT5_PRICE_DIGITS` として渡され、`target_zones.txt` の価格出力桁数に使われる。接頭辞が未設定の手動実行では旧ファイル名を維持し、価格桁数が未指定の場合は5桁を使う。
 
 代表例:
 

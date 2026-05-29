@@ -87,7 +87,7 @@
 
 ## 5. Python連携ファイル
 
-EAは `OnInit()` で `_Symbol` と `magic_number` から `HIT_<sanitized symbol>_<magic_number>` 形式の接頭辞を作り、MT5 `Files` 配下の連携ファイル名へ付与する。例: `HIT_GOLD_10001_ohlc_H4.csv`。batには同じ接頭辞を第1引数で渡し、bat側が `MT5_EA_FILE_PREFIX` としてPythonへ引き継ぐ。
+EAは `OnInit()` で `_Symbol` と `magic_number` から `HIT_<sanitized symbol>_<magic_number>` 形式の接頭辞を作り、MT5 `Files` 配下の連携ファイル名へ付与する。例: `HIT_GOLD_10001_ohlc_H4.csv`。batには同じ接頭辞を第1引数で渡し、bat側が `MT5_EA_FILE_PREFIX` としてPythonへ引き継ぐ。第2引数には `_Symbol` の `SYMBOL_DIGITS` を渡し、bat側が `MT5_PRICE_DIGITS` としてPythonへ引き継ぐ。
 
 手動実行などで接頭辞が指定されない場合、Pythonは従来どおり `ohlc_H4.csv` などの旧ファイル名を使う。
 
@@ -131,7 +131,7 @@ EAは `OnInit()` で `TerminalInfoString(TERMINAL_DATA_PATH)` から `MQL5\pytho
 7行目: T4 Sell Limit の strategy, zone_low, zone_high, tp, sl
 ```
 
-Pythonは `target_prices.txt` と `target_zones.txt` の両方を書き終えてから `process_done_entry.txt` を作成する。分割エントリーが無効な場合、EAは従来どおり `target_prices.txt` を使用する。
+Pythonは `target_prices.txt` と `target_zones.txt` の両方を書き終えてから `process_done_entry.txt` を作成する。`target_zones.txt` の価格小数桁は `MT5_PRICE_DIGITS` に合わせ、未指定時は安全側で5桁を使う。分割エントリーが無効な場合、EAは従来どおり `target_prices.txt` を使用する。
 
 ## 6. エントリー条件
 
@@ -141,8 +141,8 @@ Pythonは `target_prices.txt` と `target_zones.txt` の両方を書き終えて
 - H4トレンド判定結果が完了済みで、`trend_state.txt` を読み込める。
 - H1候補価格生成が完了済みで、`target_prices.txt` を読み込める。
 - `res_chk = 1`。
-- H1候補価格が `ENTRY_H1_LIMIT` 内で期限切れではない。
-- H1候補価格の読込から `input_entry_max_candidate_age_minutes` 分を超えていない。
+- H1候補価格が、元になったH1確定足時刻から `ENTRY_H1_LIMIT` 内で期限切れではない。
+- H1候補価格が、元になったH1確定足時刻から `input_entry_max_candidate_age_minutes` 分を超えていない。
 - 対象注文タイプの `entry/tp/sl` がすべて `0.0` より大きい。
 - H4 `market_state` に対して注文タイプが許可されている。
 - 注文タイプごとの価格整合条件とブローカー最小距離制約を満たす。
@@ -190,12 +190,14 @@ Pythonは `target_prices.txt` と `target_zones.txt` の両方を書き終えて
 - 注文/ポジション管理対象は `_Symbol` と `magic_number` が一致するものに限定する。
 - `input_position_limit` は口座全体ではなく、自EA対象分のみを数える。内部の絶対上限は `POSITION_LIMIT` とする。
 - 送信時は `SYMBOL_FILLING_MODE` を参照し、IOC、FOK、RETURNの順で利用可能な執行ポリシーを選択する。
+- 通常注文と分割注文の送信前に、ロットが `SYMBOL_VOLUME_MIN/MAX/STEP` を満たすことを検証する。
 - ペンディング注文には、ブローカーが対応する場合にサーバー側の期限を設定する。
 - `OrderSend` の戻り値と `MqlTradeResult.retcode` を確認し、失敗時は `GetLastError()` またはretcodeをログへ出力する。
 - 分割エントリーの注文コメントには `candidate_id` とslot番号を入れ、同一slotの二重発注を抑止する。
 - `cancel_old_split_pending_on_new_zone = true` の場合、新しい有効 `candidate_id` を読んだ時は旧candidateの分割pending注文を取消し、`target_zones.txt` が無効または停止値の場合は既存の分割pending注文をすべて取消する。
 - SLTP管理は `_Symbol` と `magic_number` が一致する既存ポジションのみを対象とし、TPは既存値を維持する。
 - SL変更は既存SLより利益保護方向へ改善する場合だけ実行し、ブローカーのstop level / freeze levelを満たさない候補は送信しない。
+- `HighVolatilityLimit()` はBUYをBid、SELLをAsk基準で評価し、GOLD/XAUUSDはサフィックス付きシンボルでも1 pip = 0.1として扱う。
 
 ## 9. 異常系の扱い
 
@@ -203,6 +205,7 @@ Pythonは `target_prices.txt` と `target_zones.txt` の両方を書き終えて
 - `target_prices.txt` が存在しない、読み込めない、13行未満、またはいずれかの行が数値として厳格にパースできない場合は `res_chk = 0` として扱う。
 - 分割エントリー有効時に `target_zones.txt` が存在しない、schema不一致、7行未満、`res_chk != 1`、またはいずれかの数値行を厳格にパースできない場合は新規注文を停止する。
 - Pythonプロセスが異常終了した場合、終了コードをログへ出力し、次回トリガーで再実行できる状態に戻す。
+- Pythonプロセスが `PYTHON_TIMEOUT_SECONDS` を超えても実行中の場合、`taskkill /T /F` でcmd/bat配下のプロセスツリーを終了し、done/runningファイルを整理して次回トリガーで再実行できる状態に戻す。
 - `running` ファイルだけが残っている場合は、PIDからプロセス復元を試みる。復元できずタイムアウト済みなら古いマーカーとして削除する。
 
 ## 10. 変更履歴
@@ -214,6 +217,10 @@ Pythonは `target_prices.txt` と `target_zones.txt` の両方を書き終えて
 - `trend_state.txt`、`target_prices.txt`、`target_zones.txt` の数値読込を厳格化し、不正値は安全側の停止値として扱う仕様を追加した。
 - `target_zones.txt` が無効または停止値の場合に、古い分割pending注文を全取消できる仕様を追加した。
 - 現行コードに合わせて、`input_entry_max_candidate_age_minutes`、`ENTRY_H1_LIMIT`、SLTPバッファ、Python側距離ガードの既定値を修正した。
+- Pythonタイムアウト時に実行中プロセスツリーを強制終了して再試行できる仕様を追加した。
+- H1候補の鮮度判定をPython結果の読込時刻ではなく、`candidate_id` から復元したH1確定足時刻基準へ変更した。
+- `MT5_PRICE_DIGITS` によりPython側の `target_zones.txt` 出力桁数をシンボル桁数へ合わせる仕様を追加した。
+- 通常注文ロットの `SYMBOL_VOLUME_MIN/MAX/STEP` 検証、OHLC CSVのNaN/inf・OHLC整合性検証、SELL高ボラSLのAsk基準評価、GOLD/XAUUSDサフィックス対応を追加した。
 
 ### 2026-05-27
 

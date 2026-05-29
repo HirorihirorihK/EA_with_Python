@@ -87,7 +87,7 @@
 
 ## 5. Python Integration Files
 
-During `OnInit()`, the EA builds a `HIT_<sanitized symbol>_<magic_number>` prefix from `_Symbol` and `magic_number`, then applies it to all MT5 `Files` linkage names. Example: `HIT_GOLD_10001_ohlc_H4.csv`. The same prefix is passed to the batch file as the first argument, and the batch file exposes it to Python as `MT5_EA_FILE_PREFIX`.
+During `OnInit()`, the EA builds a `HIT_<sanitized symbol>_<magic_number>` prefix from `_Symbol` and `magic_number`, then applies it to all MT5 `Files` linkage names. Example: `HIT_GOLD_10001_ohlc_H4.csv`. The same prefix is passed to the batch file as the first argument, and the batch file exposes it to Python as `MT5_EA_FILE_PREFIX`. The EA also passes the symbol's `SYMBOL_DIGITS` as the second argument, exposed to Python as `MT5_PRICE_DIGITS`.
 
 When no prefix is provided, such as manual Python execution, Python keeps using the legacy names like `ohlc_H4.csv`.
 
@@ -131,7 +131,7 @@ Line 6: T3 Sell Stop strategy, zone_low, zone_high, tp, sl
 Line 7: T4 Sell Limit strategy, zone_low, zone_high, tp, sl
 ```
 
-Python creates `process_done_entry.txt` only after both `target_prices.txt` and `target_zones.txt` have been written. When split entries are disabled, the EA keeps using the legacy 13-line `target_prices.txt` path.
+Python creates `process_done_entry.txt` only after both `target_prices.txt` and `target_zones.txt` have been written. Prices in `target_zones.txt` are formatted with `MT5_PRICE_DIGITS`; manual runs without this value use a conservative 5 decimal places. When split entries are disabled, the EA keeps using the legacy 13-line `target_prices.txt` path.
 
 ## 6. Entry Conditions
 
@@ -141,8 +141,8 @@ New entries are allowed only when all conditions below are satisfied:
 - H4 trend analysis is complete and `trend_state.txt` can be loaded.
 - H1 entry candidate generation is complete and `target_prices.txt` can be loaded.
 - `res_chk = 1`.
-- The H1 candidate set has not expired under `ENTRY_H1_LIMIT`.
-- The H1 candidate set has not exceeded `input_entry_max_candidate_age_minutes` since it was loaded.
+- The H1 candidate set has not expired under `ENTRY_H1_LIMIT`, measured from the closed H1 bar time that produced the candidate.
+- The H1 candidate set has not exceeded `input_entry_max_candidate_age_minutes`, measured from the closed H1 bar time that produced the candidate.
 - The selected order type has valid `entry/tp/sl` values greater than `0.0`.
 - The order type is allowed by the H4 `market_state`.
 - The order-type price relationship and broker minimum distance rules are satisfied.
@@ -190,12 +190,14 @@ New entries are allowed only when all conditions below are satisfied:
 - Managed orders and positions are limited to matching `_Symbol` and `magic_number`.
 - `input_position_limit` counts only this EA's orders and positions, not the full account. The hard internal limit is `POSITION_LIMIT`.
 - The EA selects the filling policy from `SYMBOL_FILLING_MODE`, preferring IOC, then FOK, then RETURN.
+- Before sending either single or split orders, the EA verifies the requested lot against `SYMBOL_VOLUME_MIN/MAX/STEP`.
 - Pending orders receive server-side expiration when the broker supports it.
 - `OrderSend` return values and `MqlTradeResult.retcode` are checked. Failures are logged with `GetLastError()` or the retcode.
 - Split-entry order comments include `candidate_id` and slot number to prevent duplicate slot execution.
 - When `cancel_old_split_pending_on_new_zone = true`, a new valid `candidate_id` cancels older split pending orders, and an invalid or stopped `target_zones.txt` cancels all existing split pending orders for this EA/symbol/magic.
 - SLTP management only targets existing positions matching `_Symbol` and `magic_number`, and it preserves each position's current TP.
 - SL changes are sent only when the candidate improves protection relative to the current SL and satisfies broker stop-level and freeze-level constraints.
+- `HighVolatilityLimit()` evaluates BUY positions with Bid and SELL positions with Ask, and treats GOLD/XAUUSD suffix symbols as 1 pip = 0.1.
 
 ## 9. Error Handling
 
@@ -203,6 +205,7 @@ New entries are allowed only when all conditions below are satisfied:
 - If `target_prices.txt` is missing, unreadable, shorter than 13 lines, or contains a non-strict numeric line, the EA uses `res_chk = 0`.
 - When split entries are enabled, missing `target_zones.txt`, schema mismatch, fewer than 7 lines, `res_chk != 1`, or non-strict numeric values stop new split orders.
 - If a Python process exits with a non-zero code, the code is logged and the next trigger may retry.
+- If a Python process remains active beyond `PYTHON_TIMEOUT_SECONDS`, the EA runs `taskkill /T /F` against the cmd/bat process tree, clears done/running files, and allows the next trigger to retry.
 - If only a stale running marker remains, the EA attempts PID recovery. If recovery fails and the marker is timed out, it removes the stale marker.
 
 ## 10. Changelog
@@ -214,6 +217,10 @@ New entries are allowed only when all conditions below are satisfied:
 - Added strict numeric parsing requirements for `trend_state.txt`, `target_prices.txt`, and `target_zones.txt`, with invalid content handled as a safe stop state.
 - Added stale split-pending cancellation behavior when `target_zones.txt` is invalid or stopped.
 - Synchronized current defaults for `input_entry_max_candidate_age_minutes`, `ENTRY_H1_LIMIT`, SLTP buffers, and the Python entry-distance guard.
+- Added process-tree termination and retry recovery for Python timeouts.
+- Changed H1 candidate freshness checks to use the closed H1 bar time restored from `candidate_id`, instead of the Python result load time.
+- Added `MT5_PRICE_DIGITS` so Python formats `target_zones.txt` prices with the active symbol's decimal precision.
+- Added single-order lot validation, OHLC CSV NaN/inf and consistency checks, Ask-based SELL high-volatility SL evaluation, and GOLD/XAUUSD suffix handling.
 
 ### 2026-05-27
 

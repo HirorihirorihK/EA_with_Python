@@ -111,7 +111,7 @@ def test_format_target_zones_includes_schema_candidate_and_all_strategies() -> N
     parsed = parse_lines_to_entry_zones_allow_subset("2,1895.00,1910.00,1885.00,1892.00,1898.00")
     sanitized = sanitize_entry_zones(parsed, selected_strategies=[2], current_price=1900.0)
 
-    actual = format_target_zones(sanitized, "202605241300")
+    actual = format_target_zones(sanitized, "202605241300", price_digits=2)
 
     assert actual.splitlines() == [
         "2",
@@ -122,6 +122,16 @@ def test_format_target_zones_includes_schema_candidate_and_all_strategies() -> N
         "3,0.00,0.00,0.00,0.00",
         "4,0.00,0.00,0.00,0.00",
     ]
+
+
+def test_format_target_zones_uses_mt5_price_digits() -> None:
+    """MT5から渡された価格桁数に合わせてゾーン価格を出力する。"""
+    parsed = parse_lines_to_entry_zones_allow_subset("2,1895.1234,1910.5678,1885.2345,1892.1234,1898.5678")
+    sanitized = sanitize_entry_zones(parsed, selected_strategies=[2], current_price=1900.0)
+
+    actual = format_target_zones(sanitized, "202605241300", price_digits=3)
+
+    assert actual.splitlines()[4] == "2,1892.123,1898.568,1910.568,1885.235"
 
 
 def test_build_candidate_id_datetime_text_returns_compact_digits() -> None:

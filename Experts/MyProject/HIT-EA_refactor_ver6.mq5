@@ -21,6 +21,7 @@
 #define WAIT_OBJECT_0                     0
 #define WAIT_TIMEOUT                      258
 #define STILL_ACTIVE                      259
+#define TASKKILL_WAIT_MILLISECONDS        5000
 
 struct STARTUPINFO_W
   {
@@ -185,6 +186,7 @@ struct EAState
    datetime          last_trend_update;     // ★追加：前回トレンドを更新した時刻
    datetime          last_target_update;    // ★変更：前回ターゲット価格を更新した時刻
    datetime          target_loaded_at;      // H1候補価格をEAへ読み込んだサーバー時刻
+   datetime          target_candidate_at;   // H1候補価格の元になった確定足時刻
    datetime          last_chk;
   };
 
