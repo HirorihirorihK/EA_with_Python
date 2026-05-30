@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import json
 import logging
@@ -29,6 +29,10 @@ class ResponsesApiDiagnostics:
     incomplete_details: str
     error: str
     usage: str
+
+    def is_completed(self) -> bool:
+        """ライブ判定に使える完了レスポンスかどうかを返す。"""
+        return self.status == "completed" and not self.incomplete_details and not self.error
 
     def to_log_text(self) -> str:
         """デバッグログへそのまま書ける1行診断文字列を返す。"""
@@ -89,12 +93,16 @@ def call_responses_api(
     user_text: str,
     image_data_urls: Sequence[str],
     max_output_tokens: int,
+    response_text_format: Mapping[str, Any] | None = None,
 ) -> ResponsesApiResult:
     """Responses APIへテキストとチャート画像を送り、出力テキストを返す。
 
     `system_content` は判定器としての役割と出力制約を指定する。
     `user_text` はH4/H1の具体的な分析依頼、数値要約、出力フォーマットを含む。
     `image_data_urls` にはPNGをdata URL化したチャート画像を渡す。空文字は無視する。
+
+    `response_text_format` が指定された場合は Responses API の `text.format` へ渡し、
+    JSON Schemaなどの構造化出力をAPI側でも強制する。
 
     戻り値は `response.output_text` をstripした文字列とAPI診断情報。
     API例外や空/不正な出力の安全側処理は、この薄いラッパーではなく
@@ -121,6 +129,9 @@ def call_responses_api(
         "reasoning": {"effort": reasoning_effort},
         "max_output_tokens": max_output_tokens,
     }
+    if response_text_format is not None:
+        create_params["text"] = {"format": dict(response_text_format)}
+
     response = client.responses.create(**create_params)
     diagnostics = _extract_response_diagnostics(response)
     text = (response.output_text or "").strip()

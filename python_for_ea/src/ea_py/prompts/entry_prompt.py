@@ -3,31 +3,68 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
-from ea_py.constants import CANDLE_LONG, CANDLE_SHORT, ENTRY_TIMEFRAME, MARKET_STATE_LABELS
+from ea_py.constants import CANDLE_LONG, CANDLE_SHORT, ENTRY_RESPONSE_SCHEMA_VERSION, ENTRY_TIMEFRAME, MARKET_STATE_LABELS
 from ea_py.market.imbalance import ImbalanceAnalysis, format_imbalance_summary
 from ea_py.market.volatility import summarize_ohlc
-from ea_py.types import OhlcBar
+from ea_py.types import OhlcBar, OhlcSummary
+
+ENTRY_REASON_CODES = (
+    "trend_breakout",
+    "pullback",
+    "range_edge",
+    "range_reversal",
+    "skip_weak_signal",
+    "skip_mid_range",
+    "skip_distance",
+    "skip_risk",
+    "skip_conflict",
+    "skip_other",
+)
 
 
 def build_system_content_block() -> str:
     """通常モード用のシステムメッセージを返す。"""
     return (
-        "あなたは優秀な投資アドバイザーです。"
-        "ユーザーの指示を厳密に守り、指定された形式の数値のみを出力してください。"
-        "思考過程や説明文は一切出力してはいけません。"
+        "あなたはアルゴリズム取引用の価格候補生成器です。"
+        "投資助言や自然文説明ではなく、指定JSON Schemaに一致する機械可読な候補だけを返してください。"
+        "ユーザーの制約、market_state、選択戦略、価格関係を厳密に守ってください。"
+        "迷う場合は必ずskipにしてください。"
     ).strip()
 
 
 def build_system_content_block_debug() -> str:
     """デバッグモード用のシステムメッセージを返す。"""
     return (
-        "あなたは優秀な投資アドバイザーです。"
-        "ユーザーの指示を厳密に守ってください。"
-        "出力は必ず指定されたブロック構造に従ってください。"
-        "NUMERIC OUTPUT では指定フォーマットの数値行のみ。"
-        "REASON OUTPUT では理由を文章で簡潔に。"
+        "あなたはアルゴリズム取引用の価格候補生成器です。"
+        "指定JSON Schemaに一致する機械可読な候補だけを返してください。"
+        "自然文の理由や思考過程は出力せず、理由はreason_codeだけで表してください。"
     ).strip()
+
+
+def _safe_ratio(numerator: float, denominator: float) -> float:
+    """0除算を避けて比率を返す。"""
+    if denominator <= 0.0:
+        return 0.0
+    return numerator / denominator
+
+
+def _format_position_metrics(summary: OhlcSummary, current_price: float) -> str:
+    """レンジ内位置と高安までの距離を要約行へ追加する。"""
+    high = float(summary["high"])
+    low = float(summary["low"])
+    price_range = float(summary["range"])
+    eatr = float(summary["eatr"])
+    range_position = _safe_ratio(current_price - low, price_range)
+    distance_to_high = high - current_price
+    distance_to_low = current_price - low
+
+    return (
+        f"  現在価格レンジ位置={range_position:.2f}（0=安値付近, 1=高値付近）, "
+        f"高値まで={distance_to_high:.2f}({_safe_ratio(distance_to_high, eatr):.2f}EATR), "
+        f"安値まで={distance_to_low:.2f}({_safe_ratio(distance_to_low, eatr):.2f}EATR)"
+    )
 
 
 def build_numeric_summary(
@@ -50,6 +87,7 @@ def build_numeric_summary(
   上ヒゲ={sum_short["latest_upper_wick"]:.2f}, 下ヒゲ={sum_short["latest_lower_wick"]:.2f},
   平均実体={sum_short["avg_body"]:.2f},
   上昇本数={sum_short["up"]}, 下落本数={sum_short["down"]}, 傾き={sum_short["slope"]:.4f}
+{_format_position_metrics(sum_short, current_price)}
 
 - 中期({sum_long["n"]}本):
   高値={sum_long["high"]:.2f}, 安値={sum_long["low"]:.2f}, レンジ={sum_long["range"]:.2f},
@@ -58,6 +96,7 @@ def build_numeric_summary(
   上ヒゲ={sum_long["latest_upper_wick"]:.2f}, 下ヒゲ={sum_long["latest_lower_wick"]:.2f},
   平均実体={sum_long["avg_body"]:.2f},
   上昇本数={sum_long["up"]}, 下落本数={sum_long["down"]}, 傾き={sum_long["slope"]:.4f}
+{_format_position_metrics(sum_long, current_price)}
 """.strip()
 
 
@@ -91,6 +130,8 @@ market_state = {trend_state}（{MARKET_STATE_LABELS.get(trend_state, "UNKNOWN")}
 【H1の役割】
 - H1では、H4 market_state と整合する方向・セットアップだけを候補にしてください。
 - H1がH4方向と明確に逆行、またはレンジ中央で優位性が弱い場合は見送ってください。
+- 画像と数値要約が矛盾する場合は、バックテスト再現性を優先して数値要約を主根拠にしてください。
+- 外部ニュース、経済指標、未知のファンダメンタル材料は考慮しないでください。
 - 実際の発注タイミングはEA側のM15確定足フィルターで確認します。
   H1ではM15の細かな反転を先読みせず、1時間以内に到達しうる妥当な候補価格を重視してください。
 """.strip()
@@ -223,7 +264,7 @@ def build_common_rules_block(
     """選択戦略に応じた価格決定ルールとGPT出力形式を作る。
 
     `selected_strategies` にはH4 market_stateと整合する戦略番号だけを渡す。
-    GPTには対象戦略の行だけを、`戦略番号,entry,tp,sl,zone_low,zone_high` の数値行で返すよう指定する。
+    GPTには対象戦略の候補だけを、JSON Schemaに一致するオブジェクトで返すよう指定する。
     各戦略のentry/tp/slの大小関係、1時間以内の到達条件、12時間以内の決済目線、
     条件が弱い場合に `0.00,0.00,0.00,0.00,0.00` で見送るルールもここで明示する。
 
@@ -267,9 +308,10 @@ def build_common_rules_block(
   - zone_high は予測ゾーンの高い価格
   - エントリー基準価格は必ず zone_low 以上 zone_high 以下にしてください。
 - 各価格の大小関係が、その戦略の条件と整合しているか必ず検証してください。
-- それぞれの戦略において、利益の期待値が最大になるように価格を設定してください。
+- reward/risk が 1.20 未満になる候補は、期待値が弱いため見送ってください。
+- SL距離がH1の値幅に対して広すぎる、またはTPまでの余地が小さすぎる候補は見送ってください。
 - 条件が弱い、ブレイク直後、レンジ中央付近、EATR基準でリスクが大きすぎる等で見送る場合は、
-  その戦略行を「戦略番号,0.00,0.00,0.00,0.00,0.00」としてください。
+  decision を "skip" とし、entry/tp/sl/zone_low/zone_high をすべて 0.0 にしてください。
 {distance_rule}
 
 【時間条件（全戦略共通）】
@@ -278,17 +320,13 @@ def build_common_rules_block(
 - エントリー後12時間以内に利確・損切に到達しなければ、その時点の価格でクローズ。
 
 【出力ルール（最重要）】
-以下の形式で **対象戦略の行だけ** 出力してください。
-
-- 1行につき1戦略
-- 行の順序は {out_order}
-- 各行は以下の6つをカンマ区切りで出力
-
-  戦略番号,エントリー基準価格,利確目標価格,ロスカット基準価格,予測ゾーン下限,予測ゾーン上限
-
-- 数値のみを出力し、説明文・空行・記号は一切出力してはいけません。
-- 各行の価格は必ず小数点以下2桁まで出力すること（例: 4812.62）。
-- 見送り行も必ず小数点以下2桁の 0.00 を使うこと。
+- Responses APIのJSON Schemaに一致するJSONオブジェクトだけを出力してください。
+- schema_version は {ENTRY_RESPONSE_SCHEMA_VERSION}。
+- strategies には対象戦略だけを入れ、順序は {out_order}。
+- 各strategy要素は strategy, decision, entry, tp, sl, zone_low, zone_high, reason_code を必ず含めてください。
+- decision は "use" または "skip" のみ。
+- reason_code は次のいずれかのみ: {", ".join(ENTRY_REASON_CODES)}
+- 自然文、Markdown、余分なキー、空行は一切出力しないでください。
 """.strip()
 
 
@@ -296,23 +334,8 @@ def build_common_rules_block_debug(
     selected_strategies: Sequence[int],
     max_entry_distance: float | dict[int, float] | None = None,
 ) -> str:
-    """理由出力を含む価格決定ルールと出力形式を作る。"""
-    base = build_common_rules_block(selected_strategies, max_entry_distance)
-    tail = """
-【デバッグ追加ルール】
-デバッグモードのため、出力を次の3ブロック構成にしてください（順番固定）。
-
-### NUMERIC OUTPUT ###
-ここには、上記「出力ルール（最重要）」に従った“数値行のみ”をそのまま出力してください。
-（余計な文字や空行は禁止）
-
-### REASON OUTPUT ###
-各出力行について、entry/tp/sl をそのように置いた意図を各1〜2行で説明してください。
-最後に「market_state をどう解釈したか」を1〜2行でまとめてください。
-
-### END ###
-""".strip()
-    return f"{base}\n\n{tail}".strip()
+    """デバッグ時もライブと同じStructured Outputsルールを使う。"""
+    return build_common_rules_block(selected_strategies, max_entry_distance)
 
 
 def build_caution_block() -> str:
@@ -321,3 +344,50 @@ def build_caution_block() -> str:
 ※ market_state とチャート/数値要約が矛盾すると判断した場合は、安全側に倒してください。
   具体的には対象戦略を 0.00,0.00,0.00 で見送ってください。
 """.strip()
+
+
+def build_entry_response_text_format(selected_strategies: Sequence[int]) -> dict[str, Any]:
+    """Responses API Structured Outputs用のJSON Schemaを返す。"""
+    strategy_enum = [int(strategy) for strategy in selected_strategies if strategy in (1, 2, 3, 4)]
+    if not strategy_enum:
+        strategy_enum = [1, 2, 3, 4]
+
+    strategy_item_schema: dict[str, Any] = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "strategy": {"type": "integer", "enum": strategy_enum},
+            "decision": {"type": "string", "enum": ["use", "skip"]},
+            "entry": {"type": "number"},
+            "tp": {"type": "number"},
+            "sl": {"type": "number"},
+            "zone_low": {"type": "number"},
+            "zone_high": {"type": "number"},
+            "reason_code": {"type": "string", "enum": list(ENTRY_REASON_CODES)},
+        },
+        "required": [
+            "strategy",
+            "decision",
+            "entry",
+            "tp",
+            "sl",
+            "zone_low",
+            "zone_high",
+            "reason_code",
+        ],
+    }
+
+    return {
+        "type": "json_schema",
+        "name": "hit_ea_entry_candidates",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "schema_version": {"type": "integer", "enum": [ENTRY_RESPONSE_SCHEMA_VERSION]},
+                "strategies": {"type": "array", "items": strategy_item_schema},
+            },
+            "required": ["schema_version", "strategies"],
+        },
+    }

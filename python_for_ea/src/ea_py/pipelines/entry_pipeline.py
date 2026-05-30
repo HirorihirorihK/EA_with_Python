@@ -11,7 +11,6 @@ from ea_py.constants import (
     CANDLE_LONG,
     CANDLE_SHORT,
     DEBUG_PRINT,
-    ENTRY_DEBUG_MAX_OUTPUT_TOKENS,
     ENTRY_MAX_DISTANCE_LIMIT_EATR_MULTIPLIER,
     ENTRY_MAX_DISTANCE_MIN_PRICE,
     ENTRY_MAX_DISTANCE_STOP_EATR_MULTIPLIER,
@@ -22,6 +21,7 @@ from ea_py.constants import (
     IMBALANCE_SENSITIVITY,
     INSTRUMENT,
     MARKET_STATE_LABELS,
+    MIN_ENTRY_REWARD_RISK_RATIO,
     MT_ENCODING,
     TECHNICAL_ERROR_STOP,
     USE_IMBALANCE_FILTER,
@@ -31,14 +31,13 @@ from ea_py.io.mt5_files import read_int_file, write_results_then_done
 from ea_py.io.ohlc_csv import read_ohlc_csv
 from ea_py.market.volatility import summarize_ohlc
 from ea_py.market.target_prices import (
-    extract_entry_blocks_debug,
     stop_numeric_list,
     strategies_by_trend,
 )
 from ea_py.market.target_zones import (
     build_candidate_id,
     format_target_zones,
-    parse_lines_to_entry_zones_allow_subset,
+    parse_json_to_entry_zones,
     sanitize_entry_zones,
     stop_entry_zones,
     zones_to_numeric_list,
@@ -54,7 +53,7 @@ from ea_py.prompts.entry_prompt import (
     build_imbalance_guidance,
     build_caution_block,
     build_common_rules_block,
-    build_common_rules_block_debug,
+    build_entry_response_text_format,
     build_header,
     build_market_state_guidance,
     build_numeric_summary,
@@ -206,7 +205,8 @@ def run_pipeline() -> None:
         f"h1_eatr={h1_eatr:.2f}, "
         f"stop_multiplier={ENTRY_MAX_DISTANCE_STOP_EATR_MULTIPLIER:.2f}, "
         f"limit_multiplier={ENTRY_MAX_DISTANCE_LIMIT_EATR_MULTIPLIER:.2f}, "
-        f"floor={ENTRY_MAX_DISTANCE_MIN_PRICE:.2f}"
+        f"floor={ENTRY_MAX_DISTANCE_MIN_PRICE:.2f}, "
+        f"min_reward_risk={MIN_ENTRY_REWARD_RISK_RATIO:.2f}"
     )
     header = build_header(
         current_price=current_price,
@@ -224,14 +224,10 @@ def run_pipeline() -> None:
         write_entry_output(stop_numeric_list())
         return
 
-    if config.debug_print:
-        system_content = build_system_content_block_debug()
-        common_rules = build_common_rules_block_debug(selected_strategies, max_entry_distance)
-        max_tokens = ENTRY_DEBUG_MAX_OUTPUT_TOKENS
-    else:
-        system_content = build_system_content_block()
-        common_rules = build_common_rules_block(selected_strategies, max_entry_distance)
-        max_tokens = ENTRY_MAX_OUTPUT_TOKENS
+    system_content = build_system_content_block_debug() if config.debug_print else build_system_content_block()
+    common_rules = build_common_rules_block(selected_strategies, max_entry_distance)
+    response_text_format = build_entry_response_text_format(selected_strategies)
+    max_tokens = ENTRY_MAX_OUTPUT_TOKENS
 
     user_text = "\n\n".join([header, market_state_guidance, imbalance_guidance, common_rules, caution]).strip()
 
@@ -246,9 +242,14 @@ def run_pipeline() -> None:
             user_text=user_text,
             image_data_urls=images_data_urls,
             max_output_tokens=max_tokens,
+            response_text_format=response_text_format,
         )
         gpt_reply = gpt_result.text
         api_diagnostics = gpt_result.diagnostics.to_log_text()
+        if not gpt_result.diagnostics.is_completed():
+            logger.error("OpenAI response incomplete or failed: %s", api_diagnostics)
+            write_entry_output(stop_numeric_list())
+            return
     except Exception:
         logger.exception("OpenAI APIエラー")
         write_entry_output(stop_numeric_list())
@@ -262,21 +263,18 @@ def run_pipeline() -> None:
             gpt_reply,
         )
 
+    entry_zones = parse_json_to_entry_zones(gpt_reply)
+    entry_zones = sanitize_entry_zones(
+        entry_zones,
+        selected_strategies,
+        current_price,
+        max_entry_distance=max_entry_distance,
+        min_reward_risk_ratio=MIN_ENTRY_REWARD_RISK_RATIO,
+    )
+    numeric_list = zones_to_numeric_list(entry_zones)
+    zone_text = format_target_zones(entry_zones, candidate_id)
+
     if config.debug_print:
-        numeric_lines, reason_text = extract_entry_blocks_debug(gpt_reply)
-        if not numeric_lines:
-            numeric_lines = gpt_reply
-
-        entry_zones = parse_lines_to_entry_zones_allow_subset(numeric_lines)
-        entry_zones = sanitize_entry_zones(
-            entry_zones,
-            selected_strategies,
-            current_price,
-            max_entry_distance=max_entry_distance,
-        )
-        numeric_list = zones_to_numeric_list(entry_zones)
-        zone_text = format_target_zones(entry_zones, candidate_id)
-
         try:
             append_debug_entry(
                 path=paths.debug_reason,
@@ -290,23 +288,13 @@ def run_pipeline() -> None:
                 selected_strategies=selected_strategies,
                 imbalance_summary=imbalance_summary,
                 numeric_summary=numeric_summary,
-                numeric_lines=numeric_lines,
+                numeric_lines=gpt_reply,
                 post_filter_summary=post_filter_summary,
                 sanitized_numeric_list=numeric_list,
-                reason_text=f"{reason_text}\n\nTARGET_ZONES\n{zone_text}".strip(),
+                reason_text=f"STRUCTURED_JSON\n{gpt_reply}\n\nTARGET_ZONES\n{zone_text}".strip(),
             )
         except Exception:
             logger.exception("debug_entry.txt write error")
-    else:
-        entry_zones = parse_lines_to_entry_zones_allow_subset(gpt_reply)
-        entry_zones = sanitize_entry_zones(
-            entry_zones,
-            selected_strategies,
-            current_price,
-            max_entry_distance=max_entry_distance,
-        )
-        numeric_list = zones_to_numeric_list(entry_zones)
-        zone_text = format_target_zones(entry_zones, candidate_id)
 
     write_entry_output(numeric_list, zone_text)
 

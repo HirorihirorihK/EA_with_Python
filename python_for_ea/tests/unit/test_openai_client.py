@@ -70,6 +70,36 @@ def test_call_responses_api_sends_reasoning_and_omits_temperature() -> None:
     assert "temperature" not in fake_client.responses.create_params
 
 
+def test_call_responses_api_sends_structured_text_format() -> None:
+    """Structured Outputs用のtext.formatをResponses APIへ渡す。"""
+    fake_client = FakeClient(FakeResponse(output_text='{"schema_version":1,"strategies":[]}'))
+    response_text_format = {
+        "type": "json_schema",
+        "name": "entry_candidates",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"schema_version": {"type": "integer"}},
+            "required": ["schema_version"],
+        },
+    }
+
+    actual = call_responses_api(
+        client=fake_client,  # type: ignore[arg-type]
+        model="gpt-5.5-2026-04-23",
+        reasoning_effort="low",
+        system_content="Return JSON.",
+        user_text="Classify.",
+        image_data_urls=[],
+        max_output_tokens=128,
+        response_text_format=response_text_format,
+    )
+
+    assert actual.text.startswith("{")
+    assert fake_client.responses.create_params["text"] == {"format": response_text_format}
+
+
 def test_call_responses_api_returns_incomplete_diagnostics_for_empty_text() -> None:
     """Empty output_text keeps the API status details for live diagnosis."""
     fake_client = FakeClient(
@@ -91,3 +121,4 @@ def test_call_responses_api_returns_incomplete_diagnostics_for_empty_text() -> N
 
     assert actual.text == ""
     assert "max_output_tokens" in actual.diagnostics.incomplete_details
+    assert not actual.diagnostics.is_completed()

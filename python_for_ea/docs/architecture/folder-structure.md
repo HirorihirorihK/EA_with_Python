@@ -207,8 +207,8 @@ EAファイルはこのPythonプロジェクトの外部連携先として扱う
 | `src/ea_py/charting/candlestick.py` | ローソク足PNG生成。 |
 | `src/ea_py/market/volatility.py` | True Range、Exponential ATR、ボラティリティ分類。 |
 | `src/ea_py/market/trend_state.py` | H4方向判定結果とボラティリティ分類の合成。 |
-| `src/ea_py/market/target_prices.py` | GPT出力のパース、価格整合性チェック、13行形式への変換。 |
-| `src/ea_py/market/target_zones.py` | GPT出力の予測ゾーンを分割エントリー用7行形式へ変換。 |
+| `src/ea_py/market/target_prices.py` | 既存13行形式への変換と価格整合性チェック。 |
+| `src/ea_py/market/target_zones.py` | Structured OutputsのGPT JSON出力を予測ゾーンへ変換し、分割エントリー用7行形式へ展開。 |
 | `src/ea_py/market/imbalance.py` | H1インバランス初動判定。 |
 | `src/ea_py/prompts/trend_prompt.py` | H4相場環境判定プロンプトの生成。 |
 | `src/ea_py/prompts/entry_prompt.py` | H1候補価格生成プロンプトの生成。 |
