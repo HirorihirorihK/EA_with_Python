@@ -243,6 +243,84 @@ bool UpdateExternalProcessStatus(ExternalProcessState &process, const string lab
   }
 
 //+------------------------------------------------------------------+
+//| 外部プロセスツリーを強制終了する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief タイムアウトしたcmd/bat配下のPythonをプロセスツリーごと終了します。
+ *
+ * @param label ログ表示用ラベル。
+ * @param process 終了対象の外部プロセス状態。
+ * @return taskkill が正常終了した場合はtrue。
+ */
+bool TerminateExternalProcessTree(const string label, ExternalProcessState &process)
+  {
+   if(process.process_id == 0)
+     {
+      Print("[", label, "] cannot terminate process tree: pid is missing.");
+      return false;
+     }
+
+   STARTUPINFO_W startup_info = {};
+   PROCESS_INFORMATION process_info = {};
+   startup_info.cb = (uint)sizeof(startup_info);
+
+   string taskkill_exe = "C:\\Windows\\System32\\taskkill.exe";
+   string command_line = "\"" + taskkill_exe + "\" /PID " +
+                         IntegerToString((long)process.process_id) + " /T /F";
+
+   int created = CreateProcessW(
+                    taskkill_exe,
+                    command_line,
+                    0,
+                    0,
+                    0,
+                    CREATE_NO_WINDOW,
+                    0,
+                    "C:\\Windows\\System32",
+                    startup_info,
+                    process_info
+                 );
+
+   if(created == 0 || process_info.hProcess == 0)
+     {
+      Print("[", label, "] taskkill launch failed. pid=", process.process_id,
+            " err=", GetLastError());
+      return false;
+     }
+
+   if(process_info.hThread != 0)
+      CloseHandle(process_info.hThread);
+
+   int wait_result = WaitForSingleObject(process_info.hProcess, TASKKILL_WAIT_MILLISECONDS);
+   uint exit_code = 1;
+   if(wait_result == WAIT_OBJECT_0)
+     {
+      if(GetExitCodeProcess(process_info.hProcess, exit_code) == 0)
+        {
+         Print("[", label, "] failed to get taskkill exit code. err=", GetLastError());
+         exit_code = 1;
+        }
+     }
+   else
+     {
+      Print("[", label, "] taskkill wait failed. result=", wait_result,
+            " err=", GetLastError());
+     }
+
+   CloseHandle(process_info.hProcess);
+   if(wait_result != WAIT_OBJECT_0 || exit_code != 0)
+     {
+      Print("[", label, "] taskkill failed. pid=", process.process_id,
+            " exit_code=", exit_code);
+      return false;
+     }
+
+   Print("[", label, "] timed-out Python process tree terminated. pid=", process.process_id);
+   ResetExternalProcessState(process);
+   return true;
+  }
+
+//+------------------------------------------------------------------+
 //| 外部プロセスがタイムアウトしているか判定する関数
 //+------------------------------------------------------------------+
 bool IsExternalProcessTimedOut(ExternalProcessState &process, const string running_file)
@@ -308,7 +386,12 @@ string BatchWorkingDirectory(const string bat_file)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool StartBatchProcess(const string bat_file, const string running_file, const string label, ExternalProcessState &process)
+bool StartBatchProcess(const string bat_file,
+                       const string running_file,
+                       const string label,
+                       ExternalProcessState &process,
+                       const string file_prefix,
+                       const int price_digits)
   {
    STARTUPINFO_W startup_info = {};
    PROCESS_INFORMATION process_info = {};
@@ -316,7 +399,8 @@ bool StartBatchProcess(const string bat_file, const string running_file, const s
    startup_info.cb = (uint)sizeof(startup_info);
 
    string cmd_exe = "C:\\Windows\\System32\\cmd.exe";
-   string command_line = "\"" + cmd_exe + "\" /c \"\"" + bat_file + "\"\"";
+   string command_line = "\"" + cmd_exe + "\" /c \"\"" + bat_file + "\" \"" +
+                         file_prefix + "\" \"" + IntegerToString(price_digits) + "\"\"";
    string current_directory = BatchWorkingDirectory(bat_file);
 
    int created = CreateProcessW(
@@ -353,7 +437,8 @@ bool StartBatchProcess(const string bat_file, const string running_file, const s
 
    CreateRunningFile(running_file, process.process_id);
    Print("[", label, "] process started. pid=", process.process_id,
-         " file=", bat_file, " cwd=", current_directory);
+         " file=", bat_file, " cwd=", current_directory,
+         " prefix=", file_prefix, " digits=", price_digits);
    return true;
   }
 
@@ -546,8 +631,17 @@ bool RecoverTimedOutProcess(const string done_file, const string running_file, c
       if(!UpdateExternalProcessStatus(process, label))
         {
          if(IsExternalProcessTimedOut(process, running_file))
+           {
             Print("[", label, "] Python exceeded ", PYTHON_TIMEOUT_SECONDS,
-                  " seconds, but the process is still running. Keep waiting.");
+                  " seconds. Terminating process tree before retry.");
+            if(TerminateExternalProcessTree(label, process))
+              {
+               DeleteRunningFile(running_file);
+               DeleteDoneFile(done_file);
+               return true;
+              }
+            Print("[", label, "] process tree termination failed. Keep waiting.");
+           }
          return false;
         }
 

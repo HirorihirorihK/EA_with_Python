@@ -3,6 +3,66 @@
 
 
 //+------------------------------------------------------------------+
+//| 注文ロットがブローカー制約を満たすか判定する関数
+//+------------------------------------------------------------------+
+/**
+ * @brief 通常注文と分割注文の最終送信前に volume min/max/step を検証します。
+ */
+bool IsOrderVolumeAllowed(const double volume, const string context)
+  {
+   double min_volume = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double max_volume = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double step_volume = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+
+   if(volume <= 0.0 || min_volume <= 0.0 || max_volume <= 0.0 || step_volume <= 0.0)
+     {
+      Print("[Order Skip] invalid volume setting. context=", context,
+            " volume=", volume, " min=", min_volume,
+            " max=", max_volume, " step=", step_volume);
+      return false;
+     }
+
+   if(volume < min_volume || volume > max_volume)
+     {
+      Print("[Order Skip] volume out of range. context=", context,
+            " volume=", volume, " min=", min_volume, " max=", max_volume);
+      return false;
+     }
+
+   double steps = (volume - min_volume) / step_volume;
+   double nearest = MathRound(steps);
+   if(MathAbs(steps - nearest) > 0.000001)
+     {
+      Print("[Order Skip] volume does not match broker step. context=", context,
+            " volume=", volume, " min=", min_volume, " step=", step_volume);
+      return false;
+     }
+
+   return true;
+  }
+
+//+------------------------------------------------------------------+
+//| ブローカーのロットstepから正規化桁数を推定する関数
+//+------------------------------------------------------------------+
+int VolumeDigits()
+  {
+   int volume_digits = 2;
+   double step_volume = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   if(step_volume > 0.0)
+     {
+      volume_digits = 0;
+      double step = step_volume;
+      while(step < 1.0 && volume_digits < 8)
+        {
+         step *= 10.0;
+         volume_digits++;
+        }
+     }
+
+   return volume_digits;
+  }
+
+//+------------------------------------------------------------------+
 //| エントリー注文を送信する関数 (1:buy-stop, 2:buy-limit, 3:sell-stop, 4:sell-limit)
 //+------------------------------------------------------------------+
 /**
@@ -23,7 +83,7 @@ bool SendOrder(int orderType, double price, double tp, double sl, double volume,
 
    request.magic            = magic_number;
    request.symbol           = _Symbol;
-   request.volume           = volume;
+   request.volume           = NormalizeDouble(volume, VolumeDigits());
    request.deviation        = slippage;
    request.type_filling     = GetOrderFillingPolicy(_Symbol);
    request.price            = NormalizeDouble(price, (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS));
@@ -63,6 +123,12 @@ bool SendOrder(int orderType, double price, double tp, double sl, double volume,
          Print(__FUNCTION__, ": invalid orderType=", orderType);
          return false;
      }
+
+   string volume_context = orderTypeStr;
+   if(comment_suffix != "")
+      volume_context += " " + comment_suffix;
+   if(!IsOrderVolumeAllowed(volume, volume_context))
+      return false;
 
 // 注文送信
    if(!OrderSend(request, result))
@@ -370,9 +436,7 @@ bool HasExistingSplitSlot(const string slot_key)
 bool CancelStaleSplitPendingOrders(const string current_candidate_id)
   {
    bool result = false;
-
-   if(current_candidate_id == "" || current_candidate_id == "0")
-      return false;
+   bool keep_current_candidate = (current_candidate_id != "" && current_candidate_id != "0");
 
    for(int i = OrdersTotal() - 1; i >= 0; i--)
      {
@@ -389,7 +453,7 @@ bool CancelStaleSplitPendingOrders(const string current_candidate_id)
       string comment = OrderGetString(ORDER_COMMENT);
       if(!IsSplitOrderComment(comment))
          continue;
-      if(IsCurrentSplitCandidateComment(comment, current_candidate_id))
+      if(keep_current_candidate && IsCurrentSplitCandidateComment(comment, current_candidate_id))
          continue;
 
       MqlTradeRequest request = {};

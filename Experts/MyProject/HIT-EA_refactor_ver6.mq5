@@ -21,6 +21,7 @@
 #define WAIT_OBJECT_0                     0
 #define WAIT_TIMEOUT                      258
 #define STILL_ACTIVE                      259
+#define TASKKILL_WAIT_MILLISECONDS        5000
 
 struct STARTUPINFO_W
   {
@@ -66,12 +67,15 @@ long OpenProcess(uint dwDesiredAccess, int bInheritHandle, uint dwProcessId);
 string python_app_dir      = "";
 string get_trend_reply_bat = ""; // H4: trend
 string get_entry_reply_bat = ""; // H1: entry
+string mt5_file_prefix     = ""; // Python linkage file namespace
 
 // プロセス完了ファイルの設定
 string done_trend_file = "process_done_trend.txt";
 string done_entry_file = "process_done_entry.txt";
 
 // Python出力ファイル
+string ohlc_h4_file = "ohlc_H4.csv";
+string ohlc_h1_file = "ohlc_H1.csv";
 string trend_state_file = "trend_state.txt";
 string target_prices_file = "target_prices.txt";
 string target_zones_file = "target_zones.txt";
@@ -182,6 +186,7 @@ struct EAState
    datetime          last_trend_update;     // ★追加：前回トレンドを更新した時刻
    datetime          last_target_update;    // ★変更：前回ターゲット価格を更新した時刻
    datetime          target_loaded_at;      // H1候補価格をEAへ読み込んだサーバー時刻
+   datetime          target_candidate_at;   // H1候補価格の元になった確定足時刻
    datetime          last_chk;
   };
 
@@ -268,10 +273,99 @@ string PythonBatchPath(const string filename)
 //|                                                                  |
 //+------------------------------------------------------------------+
 /**
+ * @brief ファイル名に使える安全なトークン文字か判定します。
+ */
+bool IsSafeFileTokenChar(const int ch)
+  {
+   return ((ch >= 48 && ch <= 57) ||   // 0-9
+           (ch >= 65 && ch <= 90) ||   // A-Z
+           (ch >= 97 && ch <= 122) ||  // a-z
+           ch == 95 || ch == 45);      // _ or -
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+/**
+ * @brief シンボル名などをファイル名向けの安全なトークンへ変換します。
+ */
+string SanitizeFileToken(const string value)
+  {
+   string result = "";
+   int length = StringLen(value);
+   for(int i = 0; i < length; i++)
+     {
+      int ch = StringGetCharacter(value, i);
+      if(IsSafeFileTokenChar(ch))
+         result += StringSubstr(value, i, 1);
+      else
+         result += "_";
+     }
+
+   if(result == "")
+      return "UNKNOWN";
+
+   return result;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+/**
+ * @brief 同一Terminal内の複数EA/複数シンボルで連携ファイルが衝突しない接頭辞を返します。
+ */
+string BuildMT5FilePrefix()
+  {
+   return "HIT_" + SanitizeFileToken(_Symbol) + "_" + IntegerToString(magic_number);
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+/**
+ * @brief Python連携ファイル名へEA固有の接頭辞を付けます。
+ */
+string PrefixedMT5FileName(const string base_name)
+  {
+   if(mt5_file_prefix == "")
+      return base_name;
+
+   return mt5_file_prefix + "_" + base_name;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+/**
+ * @brief Python連携で使用するMT5 Files配下のファイル名を初期化します。
+ */
+void ConfigurePythonGatewayFileNames()
+  {
+   mt5_file_prefix = BuildMT5FilePrefix();
+
+   ohlc_h4_file        = PrefixedMT5FileName("ohlc_H4.csv");
+   ohlc_h1_file        = PrefixedMT5FileName("ohlc_H1.csv");
+   done_trend_file     = PrefixedMT5FileName("process_done_trend.txt");
+   done_entry_file     = PrefixedMT5FileName("process_done_entry.txt");
+   trend_state_file    = PrefixedMT5FileName("trend_state.txt");
+   target_prices_file  = PrefixedMT5FileName("target_prices.txt");
+   target_zones_file   = PrefixedMT5FileName("target_zones.txt");
+   running_trend_file  = PrefixedMT5FileName("process_running_trend.txt");
+   running_entry_file  = PrefixedMT5FileName("process_running_entry.txt");
+
+   Print("Python file prefix: ", mt5_file_prefix);
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+/**
  * @brief Python連携で使用するbatパスを初期化します。
  */
 void ConfigurePythonGatewayPaths()
   {
+   ConfigurePythonGatewayFileNames();
+
    python_app_dir      = PythonAppDir();
    get_trend_reply_bat = PythonBatchPath("get_trend_reply.bat");
    get_entry_reply_bat = PythonBatchPath("get_entry_reply.bat");

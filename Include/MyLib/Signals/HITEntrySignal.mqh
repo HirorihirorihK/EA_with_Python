@@ -80,8 +80,9 @@ bool ValidateEntryPreconditions(EAState &state)
 
    if(IsTargetCandidateExpired(state))
      {
-      Print("[Entry Skip] H1 target candidate expired. loaded_at=",
-            TimeToString(state.target_loaded_at, TIME_DATE | TIME_SECONDS));
+      Print("[Entry Skip] H1 target candidate expired. candidate_at=",
+            TimeToString(TargetCandidateReferenceTime(state), TIME_DATE | TIME_SECONDS),
+            " loaded_at=", TimeToString(state.target_loaded_at, TIME_DATE | TIME_SECONDS));
       state.chk_cnt = 0;
       return false;
      }
@@ -91,6 +92,7 @@ bool ValidateEntryPreconditions(EAState &state)
       Print("[Entry Skip] H1 target candidate is too old for new execution. age=",
             TargetCandidateAgeText(state),
             " max_age_minutes=", input_entry_max_candidate_age_minutes,
+            " candidate_at=", TimeToString(TargetCandidateReferenceTime(state), TIME_DATE | TIME_SECONDS),
             " loaded_at=", TimeToString(state.target_loaded_at, TIME_DATE | TIME_SECONDS));
       state.chk_cnt = 0;
       return false;
@@ -113,19 +115,20 @@ bool ValidateEntryPreconditions(EAState &state)
 /**
  * @brief H1候補価格がENTRY_H1_LIMIT時間を超えて古くなっていないか判定します。
  *
- * @param state EA全体の状態。H1候補価格の読込時刻を参照します。
+ * @param state EA全体の状態。H1候補価格の元になった確定足時刻を参照します。
  * @return 候補価格が期限切れの場合はtrue。
  */
 bool IsTargetCandidateExpired(EAState &state)
   {
-   if(state.target_loaded_at <= 0)
+   datetime reference_time = TargetCandidateReferenceTime(state);
+   if(reference_time <= 0)
       return false;
 
    int expiration_seconds = ENTRY_H1_LIMIT * PeriodSeconds(PERIOD_H1);
    if(expiration_seconds <= 0)
       return false;
 
-   return (TimeCurrent() - state.target_loaded_at >= expiration_seconds);
+   return (TimeCurrent() - reference_time >= expiration_seconds);
   }
 
 //+------------------------------------------------------------------+
@@ -134,14 +137,14 @@ bool IsTargetCandidateExpired(EAState &state)
 /**
  * @brief M15確認が遅れて整った古いH1候補で新規注文しないように判定します。
  *
- * @param state EA全体の状態。H1候補価格の読込時刻を参照します。
+ * @param state EA全体の状態。H1候補価格の元になった確定足時刻を参照します。
  * @return 入力で指定した最大経過分数を超えている場合はtrue。
  */
 bool IsTargetCandidateTooOldForExecution(EAState &state)
   {
    if(input_entry_max_candidate_age_minutes <= 0)
       return false;
-   if(state.target_loaded_at <= 0)
+   if(TargetCandidateReferenceTime(state) <= 0)
       return false;
 
    int max_age_seconds = input_entry_max_candidate_age_minutes * 60;
@@ -152,17 +155,32 @@ bool IsTargetCandidateTooOldForExecution(EAState &state)
   }
 
 //+------------------------------------------------------------------+
+//| H1候補価格の鮮度判定に使う基準時刻を返す関数
+//+------------------------------------------------------------------+
+/**
+ * @brief Python結果の読込時刻ではなく、H1確定足由来の候補時刻を優先します。
+ */
+datetime TargetCandidateReferenceTime(EAState &state)
+  {
+   if(state.target_candidate_at > 0)
+      return state.target_candidate_at;
+
+   return state.target_loaded_at;
+  }
+
+//+------------------------------------------------------------------+
 //| H1候補価格の経過秒数を返す関数
 //+------------------------------------------------------------------+
 /**
- * @brief H1候補価格をEAへ読み込んでからの経過秒数を返します。
+ * @brief H1候補価格の元になった確定足からの経過秒数を返します。
  */
 int TargetCandidateAgeSeconds(EAState &state)
   {
-   if(state.target_loaded_at <= 0)
+   datetime reference_time = TargetCandidateReferenceTime(state);
+   if(reference_time <= 0)
       return -1;
 
-   return (int)(TimeCurrent() - state.target_loaded_at);
+   return (int)(TimeCurrent() - reference_time);
   }
 
 //+------------------------------------------------------------------+
@@ -671,7 +689,7 @@ bool IsM15EntryTimingConfirmed(const int orderType, TickContext &ctx, const doub
    if(!use_m15_entry_filter)
       return true;
 
-   if(IsTrendStopOrderType(orderType))
+   if(IsTrendStopOrderType(orderType) && !use_m15_imbalance_confirmation)
       return true;
 
    MqlRates rates[];
@@ -684,6 +702,9 @@ bool IsM15EntryTimingConfirmed(const int orderType, TickContext &ctx, const doub
 
    int last_index = copied - 1;
    int prev_index = copied - 2;
+
+   if(IsTrendStopOrderType(orderType))
+      return IsM15ImbalanceConfirmationPassed(orderType, rates, copied, last_index);
 
    double avg_range = AverageM15Range(rates, copied);
    double min_zone = M15_MIN_ENTRY_ZONE_POINTS * Point();
@@ -719,7 +740,7 @@ bool IsM15ZoneTimingConfirmed(const int orderType,
    if(!use_m15_entry_filter)
       return true;
 
-   if(IsTrendStopOrderType(orderType))
+   if(IsTrendStopOrderType(orderType) && !use_m15_imbalance_confirmation)
       return true;
 
    MqlRates rates[];
@@ -732,6 +753,9 @@ bool IsM15ZoneTimingConfirmed(const int orderType,
 
    int last_index = copied - 1;
    int prev_index = copied - 2;
+
+   if(IsTrendStopOrderType(orderType))
+      return IsM15ImbalanceConfirmationPassed(orderType, rates, copied, last_index);
 
    double avg_range = AverageM15Range(rates, copied);
    double min_zone = M15_MIN_ENTRY_ZONE_POINTS * Point();

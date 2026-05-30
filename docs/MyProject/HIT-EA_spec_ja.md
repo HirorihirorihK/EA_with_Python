@@ -11,7 +11,7 @@
 
 - 標準インジケータおよびカスタムインジケータは未使用。
 - OHLCは `CopyRates(_Symbol, timeframe, OHLC_START_SHIFT, HISTORY_BARS, rates)` で取得する。
-- M15エントリー確認は、直近確定足と1本前の確定足のローソク足形状、平均レンジ、候補価格との距離から判定する。
+- M15エントリー確認は、T2/T4では直近確定足と1本前の確定足のローソク足形状、平均レンジ、候補価格との距離から判定し、T1/T3では必要に応じてM15初動確認を行う。
 
 ## 3. パラメータ設定
 
@@ -28,7 +28,7 @@
 - `m15_imbalance_sensitivity = 2.0`: M15初動確認で現在足実体が平均実体を上回る必要倍率。
 - `m15_imbalance_min_avg_body_points = 1.0`: M15平均実体の最小値（point）。
 - `use_m15_imbalance_debug_log = false`: M15初動確認の詳細ログを出すか。
-- `input_entry_max_candidate_age_minutes = 45`: H1候補価格を新規発注に使用できる最大経過分数。古い候補でM15条件が後から整った場合の遅延エントリーを抑止する。
+- `input_entry_max_candidate_age_minutes = 120`: H1候補価格を新規発注に使用できる最大経過分数。古い候補でM15条件が後から整った場合の遅延エントリーを抑止する。
 - `input_position_limit = 10`: 自EAの未約定注文 + ポジション数の実運用上限。内部上限 `POSITION_LIMIT` を超える指定は丸める。
 - `use_split_entry_zone = false`: H1予測ゾーンを使った分割エントリーを有効化するか。
 - `split_entry_count = 3`: 分割エントリー本数。1〜10に丸めて使用する。
@@ -40,10 +40,10 @@
 - `input_sltp_show_panel = true`: チャート上にSLTP操作パネルを表示するか。
 - `input_sltp_use_breakeven = false`: 通常ブレークイーブンを有効化するか。
 - `input_sltp_breakeven_trigger_pips = 30.0`: 通常ブレークイーブンを開始する含み益pips。
-- `input_sltp_breakeven_buffer_pips = 0.0`: 通常ブレークイーブン時に建値から利益方向へずらすpips。
+- `input_sltp_breakeven_buffer_pips = 3.0`: 通常ブレークイーブン時に建値から利益方向へずらすpips。
 - `input_sltp_use_elapsed_breakeven = false`: 保有時間ベースのブレークイーブンを有効化するか。
 - `input_sltp_elapsed_breakeven_hours = 4.0`: 保有時間ベースのブレークイーブンを許可するまでの保有時間。
-- `input_sltp_elapsed_breakeven_buffer_pips = 0.0`: 保有時間ベースのブレークイーブン時に建値から利益方向へずらすpips。
+- `input_sltp_elapsed_breakeven_buffer_pips = 3.0`: 保有時間ベースのブレークイーブン時に建値から利益方向へずらすpips。
 - `input_sltp_use_active_trailing = false`: アクティブトレーリングを有効化するか。
 - `input_sltp_active_breakeven_pips = 30.0`: アクティブトレーリング開始pips。
 - `input_sltp_active_stop_loss_offset_pips = 5.0`: 開始時に建値から固定する利益pips。
@@ -57,7 +57,7 @@
 ### 主要定数
 
 - `POSITION_LIMIT = 48`: 自EAの未約定注文 + ポジション数の上限。
-- `ENTRY_H1_LIMIT = 1`: 未約定注文の有効期限（H1本数）。
+- `ENTRY_H1_LIMIT = 2`: 未約定注文の有効期限（H1本数）。
 - `CLOSE_H1_LIMIT = 12`: ポジションの時間制限クローズ（H1本数）。
 - `HISTORY_BARS = 72`: Pythonへ渡すOHLC本数。
 - `OHLC_START_SHIFT = 1`: 確定足からOHLCを取得するためのシフト。
@@ -71,7 +71,7 @@
 ### Python側エントリー候補ガード
 
 - H1候補価格生成後、Python側で現在価格から遠すぎる `entry` を無効化する。
-- 距離上限は `max(H1 EATR * 0.65, 5.00)` とし、上限を超えた戦略は `0.00,0.00,0.00` に補正する。
+- 距離上限は戦略別に計算し、T1/T3のStop系は `max(H1 EATR * 1.50, 5.00)`、T2/T4のLimit系は `max(H1 EATR * 1.00, 5.00)` とする。上限を超えた戦略は `0.00,0.00,0.00` に補正する。
 - このガードは、深い指値や遠いブレイク待ちがM15確認後に遅れて発注されることを抑えるための後処理である。
 
 ## 4. ファイル構成
@@ -87,20 +87,24 @@
 
 ## 5. Python連携ファイル
 
+EAは `OnInit()` で `_Symbol` と `magic_number` から `HIT_<sanitized symbol>_<magic_number>` 形式の接頭辞を作り、MT5 `Files` 配下の連携ファイル名へ付与する。例: `HIT_GOLD_10001_ohlc_H4.csv`。batには同じ接頭辞を第1引数で渡し、bat側が `MT5_EA_FILE_PREFIX` としてPythonへ引き継ぐ。第2引数には `_Symbol` の `SYMBOL_DIGITS` を渡し、bat側が `MT5_PRICE_DIGITS` としてPythonへ引き継ぐ。
+
+手動実行などで接頭辞が指定されない場合、Pythonは従来どおり `ohlc_H4.csv` などの旧ファイル名を使う。
+
 ### H4トレンド判定
 
-- MQL5出力: `ohlc_H4.csv`
-- Python出力: `trend_state.txt`
-- 完了フラグ: `process_done_trend.txt`
-- 実行中フラグ: `process_running_trend.txt`
+- MQL5出力: `<prefix>_ohlc_H4.csv`
+- Python出力: `<prefix>_trend_state.txt`
+- 完了フラグ: `<prefix>_process_done_trend.txt`
+- 実行中フラグ: `<prefix>_process_running_trend.txt`
 - 起動バッチ: `<TerminalDataPath>\MQL5\python_for_ea\bat\get_trend_reply.bat`
 
 ### H1エントリー価格生成
 
-- MQL5出力: `ohlc_H1.csv`
-- Python出力: `target_prices.txt`, `target_zones.txt`
-- 完了フラグ: `process_done_entry.txt`
-- 実行中フラグ: `process_running_entry.txt`
+- MQL5出力: `<prefix>_ohlc_H1.csv`
+- Python出力: `<prefix>_target_prices.txt`, `<prefix>_target_zones.txt`
+- 完了フラグ: `<prefix>_process_done_entry.txt`
+- 実行中フラグ: `<prefix>_process_running_entry.txt`
 - 起動バッチ: `<TerminalDataPath>\MQL5\python_for_ea\bat\get_entry_reply.bat`
 
 EAは `OnInit()` で `TerminalInfoString(TERMINAL_DATA_PATH)` から `MQL5\python_for_ea` を解決し、各batファイルの絶対パスを組み立てる。batファイルは自身の位置からPythonプロジェクトルートを解決するため、`C:\ea_py` には依存しない。
@@ -127,7 +131,7 @@ EAは `OnInit()` で `TerminalInfoString(TERMINAL_DATA_PATH)` から `MQL5\pytho
 7行目: T4 Sell Limit の strategy, zone_low, zone_high, tp, sl
 ```
 
-Pythonは `target_prices.txt` と `target_zones.txt` の両方を書き終えてから `process_done_entry.txt` を作成する。分割エントリーが無効な場合、EAは従来どおり `target_prices.txt` を使用する。
+Pythonは `target_prices.txt` と `target_zones.txt` の両方を書き終えてから `process_done_entry.txt` を作成する。`target_zones.txt` の価格小数桁は `MT5_PRICE_DIGITS` に合わせ、未指定時は安全側で5桁を使う。分割エントリーが無効な場合、EAは従来どおり `target_prices.txt` を使用する。
 
 ## 6. エントリー条件
 
@@ -137,12 +141,12 @@ Pythonは `target_prices.txt` と `target_zones.txt` の両方を書き終えて
 - H4トレンド判定結果が完了済みで、`trend_state.txt` を読み込める。
 - H1候補価格生成が完了済みで、`target_prices.txt` を読み込める。
 - `res_chk = 1`。
-- H1候補価格が `ENTRY_H1_LIMIT` 内で期限切れではない。
-- H1候補価格の読込から `input_entry_max_candidate_age_minutes` 分を超えていない。
+- H1候補価格が、元になったH1確定足時刻から `ENTRY_H1_LIMIT` 内で期限切れではない。
+- H1候補価格が、元になったH1確定足時刻から `input_entry_max_candidate_age_minutes` 分を超えていない。
 - 対象注文タイプの `entry/tp/sl` がすべて `0.0` より大きい。
 - H4 `market_state` に対して注文タイプが許可されている。
 - 注文タイプごとの価格整合条件とブローカー最小距離制約を満たす。
-- `use_m15_entry_filter = true` の場合、M15確定足の方向・反発・接近条件を満たす。
+- `use_m15_entry_filter = true` の場合、T2/T4はM15確定足の方向・反発・接近条件を満たす。T1/T3は `use_m15_imbalance_confirmation = true` の場合にM15初動確認を満たす。
 - 自EAの注文 + ポジション数が `input_position_limit` 未満。
 - 分割エントリー有効時は `target_zones.txt` の `res_chk = 1`、予測ゾーンの価格整合、分割ロットの `SYMBOL_VOLUME_MIN/MAX/STEP` 適合、同一 `candidate_id` + slot の重複注文/ポジション不存在を満たす。
 
@@ -154,7 +158,7 @@ Pythonは `target_prices.txt` と `target_zones.txt` の両方を書き終えて
 - `3 MARKET_HIGH_VOL_UP`: T1 Buy Stop / T2 Buy Limit を許可。
 - `4 MARKET_LOW_VOL_DOWN`: T3 Sell Stop / T4 Sell Limit を許可。
 - `5 MARKET_HIGH_VOL_DOWN`: T3 Sell Stop / T4 Sell Limit を許可。
-- `6 MARKET_ABNORMAL_VOL_STOP`: 新規注文を停止。
+- `6 MARKET_TECHNICAL_ERROR_STOP`: 新規注文を停止。
 
 ### 注文タイプごとの価格整合条件
 
@@ -186,21 +190,37 @@ Pythonは `target_prices.txt` と `target_zones.txt` の両方を書き終えて
 - 注文/ポジション管理対象は `_Symbol` と `magic_number` が一致するものに限定する。
 - `input_position_limit` は口座全体ではなく、自EA対象分のみを数える。内部の絶対上限は `POSITION_LIMIT` とする。
 - 送信時は `SYMBOL_FILLING_MODE` を参照し、IOC、FOK、RETURNの順で利用可能な執行ポリシーを選択する。
+- 通常注文と分割注文の送信前に、ロットが `SYMBOL_VOLUME_MIN/MAX/STEP` を満たすことを検証する。
 - ペンディング注文には、ブローカーが対応する場合にサーバー側の期限を設定する。
 - `OrderSend` の戻り値と `MqlTradeResult.retcode` を確認し、失敗時は `GetLastError()` またはretcodeをログへ出力する。
 - 分割エントリーの注文コメントには `candidate_id` とslot番号を入れ、同一slotの二重発注を抑止する。
+- `cancel_old_split_pending_on_new_zone = true` の場合、新しい有効 `candidate_id` を読んだ時は旧candidateの分割pending注文を取消し、`target_zones.txt` が無効または停止値の場合は既存の分割pending注文をすべて取消する。
 - SLTP管理は `_Symbol` と `magic_number` が一致する既存ポジションのみを対象とし、TPは既存値を維持する。
 - SL変更は既存SLより利益保護方向へ改善する場合だけ実行し、ブローカーのstop level / freeze levelを満たさない候補は送信しない。
+- `HighVolatilityLimit()` はBUYをBid、SELLをAsk基準で評価し、GOLD/XAUUSDはサフィックス付きシンボルでも1 pip = 0.1として扱う。
 
 ## 9. 異常系の扱い
 
-- `trend_state.txt` が存在しない、読み込めない、または `0..6` 以外の場合は `MARKET_ABNORMAL_VOL_STOP` として扱う。
-- `target_prices.txt` が存在しない、読み込めない、または13行未満の場合は `res_chk = 0` として扱う。
-- 分割エントリー有効時に `target_zones.txt` が存在しない、schema不一致、7行未満、または `res_chk != 1` の場合は新規注文を停止する。
+- `trend_state.txt` が存在しない、読み込めない、整数として厳格にパースできない、または `0..6` 以外の場合は `MARKET_TECHNICAL_ERROR_STOP` として扱う。
+- `target_prices.txt` が存在しない、読み込めない、13行未満、またはいずれかの行が数値として厳格にパースできない場合は `res_chk = 0` として扱う。
+- 分割エントリー有効時に `target_zones.txt` が存在しない、schema不一致、7行未満、`res_chk != 1`、またはいずれかの数値行を厳格にパースできない場合は新規注文を停止する。
 - Pythonプロセスが異常終了した場合、終了コードをログへ出力し、次回トリガーで再実行できる状態に戻す。
+- Pythonプロセスが `PYTHON_TIMEOUT_SECONDS` を超えても実行中の場合、`taskkill /T /F` でcmd/bat配下のプロセスツリーを終了し、done/runningファイルを整理して次回トリガーで再実行できる状態に戻す。
 - `running` ファイルだけが残っている場合は、PIDからプロセス復元を試みる。復元できずタイムアウト済みなら古いマーカーとして削除する。
 
 ## 10. 変更履歴
+
+### 2026-05-30
+
+- 同一Terminal内の複数EA/複数シンボルでPython連携ファイルが衝突しないよう、`HIT_<symbol>_<magic_number>` 接頭辞をMT5/Python双方のファイル名へ適用する仕様に更新した。
+- T1/T3の順張り候補でも `use_m15_imbalance_confirmation = true` の場合はM15初動確認を必須とする仕様に更新した。
+- `trend_state.txt`、`target_prices.txt`、`target_zones.txt` の数値読込を厳格化し、不正値は安全側の停止値として扱う仕様を追加した。
+- `target_zones.txt` が無効または停止値の場合に、古い分割pending注文を全取消できる仕様を追加した。
+- 現行コードに合わせて、`input_entry_max_candidate_age_minutes`、`ENTRY_H1_LIMIT`、SLTPバッファ、Python側距離ガードの既定値を修正した。
+- Pythonタイムアウト時に実行中プロセスツリーを強制終了して再試行できる仕様を追加した。
+- H1候補の鮮度判定をPython結果の読込時刻ではなく、`candidate_id` から復元したH1確定足時刻基準へ変更した。
+- `MT5_PRICE_DIGITS` によりPython側の `target_zones.txt` 出力桁数をシンボル桁数へ合わせる仕様を追加した。
+- 通常注文ロットの `SYMBOL_VOLUME_MIN/MAX/STEP` 検証、OHLC CSVのNaN/inf・OHLC整合性検証、SELL高ボラSLのAsk基準評価、GOLD/XAUUSDサフィックス対応を追加した。
 
 ### 2026-05-27
 
@@ -217,8 +237,8 @@ Pythonは `target_prices.txt` と `target_zones.txt` の両方を書き終えて
 
 ### 2026-05-13
 
-- Python側にH1 EATRベースの候補距離ガードを追加し、現在価格から `max(H1 EATR * 0.65, 5.00)` を超える候補をMT5へ渡す前に無効化する仕様を追加。
-- EA側に `input_entry_max_candidate_age_minutes = 45` を追加し、M15確認が遅れて整った古いH1候補で新規発注しないようにした。
+- Python側にH1 EATRベースの候補距離ガードを追加し、現在価格から遠すぎる候補をMT5へ渡す前に無効化する仕様を追加。
+- EA側に `input_entry_max_candidate_age_minutes` を追加し、M15確認が遅れて整った古いH1候補で新規発注しないようにした。
 - エントリー見送りログへH1候補の経過秒数を追加し、遅延・M15未確認・価格不整合の原因を追跡しやすくした。
 
 ### 2026-05-05

@@ -11,6 +11,8 @@ DEFAULT_USER_NAME = "new"
 DEFAULT_TERMINAL_ID = "5BDB0B60344C088C2FA5CA35699BAAFD"
 ENV_MT5_FILES_DIR = "MT5_FILES_DIR"
 ENV_MT5_DATA_PATH = "MT5_DATA_PATH"
+ENV_MT5_EA_FILE_PREFIX = "MT5_EA_FILE_PREFIX"
+ENV_MT5_PRICE_DIGITS = "MT5_PRICE_DIGITS"
 
 
 @dataclass(frozen=True)
@@ -21,6 +23,8 @@ class Mt5PathSettings:
     data_path: Path | None = None
     user_name: str | None = None
     terminal_id: str | None = None
+    file_prefix: str | None = None
+    price_digits: int | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +70,63 @@ def files_dir_from_data_path(data_path: Path) -> Path:
         return resolved / "Files"
 
     return resolved / "MQL5" / "Files"
+
+
+def sanitize_file_prefix(prefix: str) -> str:
+    """EAから渡されたファイル接頭辞を安全なファイル名トークンへ丸める。"""
+    stripped = prefix.strip()
+    if not stripped:
+        return ""
+
+    safe_chars = []
+    for char in stripped:
+        if (char.isascii() and char.isalnum()) or char in {"_", "-"}:
+            safe_chars.append(char)
+        else:
+            safe_chars.append("_")
+
+    return "".join(safe_chars)
+
+
+def mt5_file_prefix(settings: Mt5PathSettings | None = None) -> str:
+    """MT5連携ファイル名へ付けるEA固有接頭辞を返す。"""
+    if settings and settings.file_prefix is not None:
+        return sanitize_file_prefix(settings.file_prefix)
+
+    return sanitize_file_prefix(os.getenv(ENV_MT5_EA_FILE_PREFIX, ""))
+
+
+def prefixed_file_name(base_name: str, settings: Mt5PathSettings | None = None) -> str:
+    """接頭辞がある場合だけ `prefix_base_name` 形式にする。"""
+    prefix = mt5_file_prefix(settings)
+    if not prefix:
+        return base_name
+
+    return f"{prefix}_{base_name}"
+
+
+def sanitize_price_digits(value: int | str | None) -> int | None:
+    """MT5から渡された価格桁数を安全な範囲へ丸める。"""
+    if value is None:
+        return None
+
+    try:
+        digits = int(value)
+    except (TypeError, ValueError):
+        return None
+
+    if 0 <= digits <= 10:
+        return digits
+
+    return None
+
+
+def mt5_price_digits(settings: Mt5PathSettings | None = None) -> int | None:
+    """MT5連携価格の小数桁数を返す。未指定や不正値はNone。"""
+    if settings and settings.price_digits is not None:
+        return sanitize_price_digits(settings.price_digits)
+
+    return sanitize_price_digits(os.getenv(ENV_MT5_PRICE_DIGITS))
 
 
 def terminal_files_dir(settings: Mt5PathSettings | None = None) -> Path:
@@ -127,11 +188,11 @@ def build_trend_paths(settings: Mt5PathSettings | None = None) -> TrendPaths:
     """H4トレンド判定用の入出力パスをまとめて返す。"""
     base_dir = terminal_files_dir(settings)
     return TrendPaths(
-        input_csv=base_dir / "ohlc_H4.csv",
-        trend_state=base_dir / "trend_state.txt",
-        done_trend=base_dir / "process_done_trend.txt",
-        tmp_chart=base_dir / "tmp_chart_trend.png",
-        debug_reason=base_dir / "debug_trend.txt",
+        input_csv=base_dir / prefixed_file_name("ohlc_H4.csv", settings),
+        trend_state=base_dir / prefixed_file_name("trend_state.txt", settings),
+        done_trend=base_dir / prefixed_file_name("process_done_trend.txt", settings),
+        tmp_chart=base_dir / prefixed_file_name("tmp_chart_trend.png", settings),
+        debug_reason=base_dir / prefixed_file_name("debug_trend.txt", settings),
     )
 
 
@@ -139,12 +200,12 @@ def build_entry_paths(settings: Mt5PathSettings | None = None) -> EntryPaths:
     """H1エントリー候補生成用の入出力パスをまとめて返す。"""
     base_dir = terminal_files_dir(settings)
     return EntryPaths(
-        input_csv=base_dir / "ohlc_H1.csv",
-        output_prices=base_dir / "target_prices.txt",
-        output_zones=base_dir / "target_zones.txt",
-        trend_state=base_dir / "trend_state.txt",
-        done_entry=base_dir / "process_done_entry.txt",
-        tmp_short_chart=base_dir / "tmp_chart_short.png",
-        tmp_long_chart=base_dir / "tmp_chart_long.png",
-        debug_reason=base_dir / "debug_entry.txt",
+        input_csv=base_dir / prefixed_file_name("ohlc_H1.csv", settings),
+        output_prices=base_dir / prefixed_file_name("target_prices.txt", settings),
+        output_zones=base_dir / prefixed_file_name("target_zones.txt", settings),
+        trend_state=base_dir / prefixed_file_name("trend_state.txt", settings),
+        done_entry=base_dir / prefixed_file_name("process_done_entry.txt", settings),
+        tmp_short_chart=base_dir / prefixed_file_name("tmp_chart_short.png", settings),
+        tmp_long_chart=base_dir / prefixed_file_name("tmp_chart_long.png", settings),
+        debug_reason=base_dir / prefixed_file_name("debug_entry.txt", settings),
     )
