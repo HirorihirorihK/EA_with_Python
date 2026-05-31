@@ -100,7 +100,7 @@ enum SplitLotMode
 input double lot_size      = 0.01;  // ロット数
 input double spread_limit  = 60;    // 許容スプレッド(point)
 input int    magic_number  = 10001; // マジックナンバー
-input int    initial_order = 0;     // 互換性維持用。起動時H4/H1再構築は常時実行
+input int    initial_order = 0;     // 起動時の注文(0:なし, 1:あり)
 input int    input_position_limit = 10; // 自EAの未約定注文+ポジション上限
 input bool   use_split_entry_zone = false; // H1予測ゾーンで分割エントリーする
 input int    split_entry_count = 3; // 分割エントリー本数(1..10)
@@ -108,7 +108,6 @@ input SplitLotMode split_lot_mode = SPLIT_LOT_TOTAL; // 分割ロット配分モ
 input double split_total_lot_size = 0.09; // 総量分割モードの合計ロット
 input double split_fixed_lot_size = 0.01; // 固定ロットモードの1注文ロット
 input bool   cancel_old_split_pending_on_new_zone = true; // 新ゾーン読込時に旧分割pendingを取消
-input int    input_cancel_retry_cooldown_seconds = 60; // pending取消失敗時のticket単位再試行間隔
 input bool   use_m15_entry_filter = true;  // M15確定足で発注タイミングを確認
 input double m15_entry_zone_atr_multiplier = 1.50; // M15平均レンジ何本分まで候補価格への接近を許可
 input bool   use_m15_imbalance_confirmation = true; // T1/T3でM15初動確認を追加
@@ -193,8 +192,8 @@ struct EAState
 
 EAState g_ea;  // EA全体の状態をここで管理
 
-// Startup refresh flags for H4 trend and H1 entry candidates.
-// Keep them separate to prevent repeated startup launches.
+// initial_order 用の初回処理フラグ
+// H4トレンド処理とH1エントリー処理で別々に管理し、初回起動時の再実行ループを防ぐ。
 bool g_init_trend_pending = false;
 bool g_init_entry_pending = false;
 
@@ -204,10 +203,6 @@ int  g_pre_bars_H1   = 0;
 int  g_pre_bars_M15  = 0;
 bool g_bars_H1_check = false;
 bool g_bars_M15_check = false;
-
-// pending取消失敗時の過剰な取引サーバー要求を防止する。
-ulong    g_cancel_retry_tickets[];
-datetime g_cancel_retry_at[];
 
 // ティックごとの価格情報
 struct TickContext
@@ -384,9 +379,9 @@ void ConfigurePythonGatewayPaths()
 /**
  * @brief EA起動時の初期化処理を行います。
  *
- * Python連携用のdone/runningファイル状態を確認し、起動直後は安全側として
+ * Python連携用のdone/runningファイル状態を確認し、`initial_order` が有効な場合は
  * H4トレンド判定とH1エントリー価格生成をそれぞれ初回実行対象にします。
- * H4結果を再読込するまでは技術エラー停止値を維持し、古い連携結果での発注を防ぎます。
+ * H4/H1の初回フラグを分けることで、起動直後にH4処理だけが繰り返される状態を防ぎます。
  */
 int OnInit()
 // プロセス完了ファイルと実行中ファイルの状態を初期化
@@ -396,15 +391,9 @@ int OnInit()
    PrepareDoneFileOnInit(done_trend_file, running_trend_file, "trend");
    PrepareDoneFileOnInit(done_entry_file, running_entry_file, "entry");
 
-   // Always rebuild startup state before allowing new orders.
-   g_ea.trend_state      = MARKET_TECHNICAL_ERROR_STOP;
-   g_ea.res_chk          = 0;
-   g_ea.zone_res_chk     = 0;
-   g_ea.zone_candidate_id = "0";
-   g_init_trend_pending  = true;
-   g_init_entry_pending  = true;
-   ArrayResize(g_cancel_retry_tickets, 0);
-   ArrayResize(g_cancel_retry_at, 0);
+   // initial_order=1 の場合でも、H4/H1を別々に1回だけ初回実行する。
+   g_init_trend_pending = (initial_order == 1);
+   g_init_entry_pending = (initial_order == 1);
 
    if(!InitializeSLTPManager())
       return INIT_FAILED;

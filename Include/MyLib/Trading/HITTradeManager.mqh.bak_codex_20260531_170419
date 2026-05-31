@@ -73,12 +73,10 @@ int VolumeDigits()
  * @param tp 利確価格。
  * @param sl 損切価格。
  * @param volume 注文ロット。
- * @param comment_suffix H1候補または分割注文識別用のコメント接尾辞。空なら従来コメント。
- * @param candidate_reference_time H1候補の元になった確定足時刻。取得不能時は0。
+ * @param comment_suffix 分割注文識別用のコメント接尾辞。空なら従来コメント。
  * @return 注文が正常に受理された場合はtrue、それ以外はfalse。
  */
-bool SendOrder(int orderType, double price, double tp, double sl, double volume,
-               string comment_suffix, datetime candidate_reference_time)
+bool SendOrder(int orderType, double price, double tp, double sl, double volume, string comment_suffix)
   {
    MqlTradeRequest request  = {};
    MqlTradeResult result    = {};
@@ -97,8 +95,7 @@ bool SendOrder(int orderType, double price, double tp, double sl, double volume,
 
 // 指値または逆指値注文
    request.action = TRADE_ACTION_PENDING;
-   if(!ApplyPendingOrderExpiration(request, candidate_reference_time))
-      return false;
+   ApplyPendingOrderExpiration(request);
 
    switch(orderType)
      {
@@ -181,48 +178,35 @@ ENUM_ORDER_TYPE_FILLING GetOrderFillingPolicy(string symbol)
  * @brief brokerが対応している範囲でpending orderにサーバー側の期限を設定します。
  *
  * @param request 更新対象の取引リクエスト。
- * @param candidate_reference_time H1候補の元になった確定足時刻。取得不能時は0。
- * @return H1候補の期限が残っている場合はtrue。発注前に期限切れならfalse。
  */
-bool ApplyPendingOrderExpiration(MqlTradeRequest &request, const datetime candidate_reference_time)
+void ApplyPendingOrderExpiration(MqlTradeRequest &request)
   {
    int expiration_seconds = ENTRY_H1_LIMIT * PeriodSeconds(PERIOD_H1);
-   datetime expiration_at = TimeCurrent() + expiration_seconds;
-   if(candidate_reference_time > 0)
-      expiration_at = candidate_reference_time + expiration_seconds;
-
-   if(expiration_seconds <= 0 || expiration_at <= TimeCurrent())
-     {
-      Print("[Order Skip] H1 candidate expiration is not in the future. candidate_at=",
-            TimeToString(candidate_reference_time, TIME_DATE | TIME_SECONDS),
-            " expiration_at=", TimeToString(expiration_at, TIME_DATE | TIME_SECONDS));
-      return false;
-     }
-
    long expiration_mode = SymbolInfoInteger(request.symbol, SYMBOL_EXPIRATION_MODE);
 
-   if((expiration_mode & SYMBOL_EXPIRATION_SPECIFIED) != 0)
+   if(expiration_seconds > 0 &&
+      (expiration_mode & SYMBOL_EXPIRATION_SPECIFIED) != 0)
      {
       request.type_time = ORDER_TIME_SPECIFIED;
-      request.expiration = expiration_at;
-      return true;
+      request.expiration = TimeCurrent() + expiration_seconds;
+      return;
      }
 
-   if((expiration_mode & SYMBOL_EXPIRATION_SPECIFIED_DAY) != 0)
+   if(expiration_seconds > 0 &&
+      (expiration_mode & SYMBOL_EXPIRATION_SPECIFIED_DAY) != 0)
      {
       request.type_time = ORDER_TIME_SPECIFIED_DAY;
-      request.expiration = expiration_at;
-      return true;
+      request.expiration = TimeCurrent() + expiration_seconds;
+      return;
      }
 
    if((expiration_mode & SYMBOL_EXPIRATION_DAY) != 0)
      {
       request.type_time = ORDER_TIME_DAY;
-      return true;
+      return;
      }
 
    request.type_time = ORDER_TIME_GTC;
-   return true;
   }
 
 //+------------------------------------------------------------------+
@@ -408,215 +392,6 @@ bool IsCurrentSplitCandidateComment(const string comment, const string candidate
   }
 
 //+------------------------------------------------------------------+
-//| pending取消のticket単位クールダウン管理
-//+------------------------------------------------------------------+
-// Prevent repeated server-side cancel requests for the same pending ticket.
-int EffectiveCancelRetryCooldownSeconds()
-  {
-   int cooldown = input_cancel_retry_cooldown_seconds;
-   if(cooldown < 1)
-      cooldown = 1;
-   if(cooldown > 3600)
-      cooldown = 3600;
-
-   return cooldown;
-  }
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-int FindPendingOrderCancelAttempt(const ulong ticket)
-  {
-   for(int i = ArraySize(g_cancel_retry_tickets) - 1; i >= 0; i--)
-     {
-      if(g_cancel_retry_tickets[i] == ticket)
-         return i;
-     }
-
-   return -1;
-  }
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-void RemovePendingOrderCancelAttemptAt(const int index)
-  {
-   int size = ArraySize(g_cancel_retry_tickets);
-   if(index < 0 || index >= size)
-      return;
-
-   int last = size - 1;
-   if(index != last)
-     {
-      g_cancel_retry_tickets[index] = g_cancel_retry_tickets[last];
-      g_cancel_retry_at[index] = g_cancel_retry_at[last];
-     }
-
-   ArrayResize(g_cancel_retry_tickets, last);
-   ArrayResize(g_cancel_retry_at, last);
-  }
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-void ForgetPendingOrderCancelAttempt(const ulong ticket)
-  {
-   RemovePendingOrderCancelAttemptAt(FindPendingOrderCancelAttempt(ticket));
-  }
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-bool CanAttemptPendingOrderCancel(const ulong ticket)
-  {
-   int index = FindPendingOrderCancelAttempt(ticket);
-   if(index < 0)
-      return true;
-
-   return (TimeCurrent() - g_cancel_retry_at[index] >= EffectiveCancelRetryCooldownSeconds());
-  }
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-void MarkPendingOrderCancelAttempt(const ulong ticket)
-  {
-   int index = FindPendingOrderCancelAttempt(ticket);
-   if(index >= 0)
-     {
-      g_cancel_retry_at[index] = TimeCurrent();
-      return;
-     }
-
-   int size = ArraySize(g_cancel_retry_tickets);
-   ArrayResize(g_cancel_retry_tickets, size + 1);
-   ArrayResize(g_cancel_retry_at, size + 1);
-   g_cancel_retry_tickets[size] = ticket;
-   g_cancel_retry_at[size] = TimeCurrent();
-  }
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-void CleanupPendingOrderCancelAttempts()
-  {
-   for(int i = ArraySize(g_cancel_retry_tickets) - 1; i >= 0; i--)
-     {
-      if(!OrderSelect(g_cancel_retry_tickets[i]))
-         RemovePendingOrderCancelAttemptAt(i);
-     }
-  }
-
-//+------------------------------------------------------------------+
-//| pending取消要求を共通化する関数
-//+------------------------------------------------------------------+
-/**
- * @brief 同一ticketへの取消要求をクールダウンし、取引サーバーへの過剰送信を防ぎます。
- */
-bool TryCancelPendingOrder(const ulong ticket, const string reason)
-  {
-   if(ticket == 0 || !CanAttemptPendingOrderCancel(ticket))
-      return false;
-
-   MarkPendingOrderCancelAttempt(ticket);
-
-   MqlTradeRequest request = {};
-   MqlTradeResult trade_result = {};
-   request.action = TRADE_ACTION_REMOVE;
-   request.order = ticket;
-
-   ResetLastError();
-   if(!OrderSend(request, trade_result))
-     {
-      Print("Failed to delete order. Ticket: ", ticket,
-            " Reason: ", reason, " Error: ", GetLastError(),
-            " RetryAfterSeconds: ", EffectiveCancelRetryCooldownSeconds());
-      return false;
-     }
-
-   if(trade_result.retcode == TRADE_RETCODE_DONE)
-     {
-      Print("Pending order canceled. Ticket: ", ticket, " Reason: ", reason);
-      ForgetPendingOrderCancelAttempt(ticket);
-      return true;
-     }
-
-   Print("Order cancellation failed. Ticket: ", ticket,
-         " Reason: ", reason, " Retcode: ", trade_result.retcode,
-         " RetryAfterSeconds: ", EffectiveCancelRetryCooldownSeconds());
-   return false;
-  }
-
-//+------------------------------------------------------------------+
-//| pending注文タイプをEA戦略番号へ変換する関数
-//+------------------------------------------------------------------+
-int PendingOrderStrategy(const ENUM_ORDER_TYPE order_type)
-  {
-   switch(order_type)
-     {
-      case ORDER_TYPE_BUY_STOP:
-         return 1;
-      case ORDER_TYPE_BUY_LIMIT:
-         return 2;
-      case ORDER_TYPE_SELL_STOP:
-         return 3;
-      case ORDER_TYPE_SELL_LIMIT:
-         return 4;
-      default:
-         return 0;
-     }
-  }
-
-//+------------------------------------------------------------------+
-//| H4 market_stateと矛盾するpending注文を取消する関数
-//+------------------------------------------------------------------+
-// Cancel pending orders that contradict the refreshed H4 market state.
-bool CancelPendingOrdersNotAllowedByTrend(const int trend_state)
-  {
-   bool result = false;
-   CleanupPendingOrderCancelAttempts();
-
-   for(int i = OrdersTotal() - 1; i >= 0; i--)
-     {
-      ulong ticket = OrderGetTicket(i);
-      if(ticket == 0 || !OrderSelect(ticket))
-         continue;
-      if(OrderGetString(ORDER_SYMBOL) != _Symbol)
-         continue;
-      if((int)OrderGetInteger(ORDER_MAGIC) != magic_number)
-         continue;
-
-      int strategy = PendingOrderStrategy((ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE));
-      if(strategy > 0 && IsOrderTypeAllowedByTrend(strategy, trend_state))
-         continue;
-
-      string reason = "H4 market_state=" + IntegerToString(trend_state) +
-                      " strategy=" + IntegerToString(strategy);
-      if(TryCancelPendingOrder(ticket, reason))
-         result = true;
-     }
-
-   return result;
-  }
-
-//+------------------------------------------------------------------+
-//| pendingコメントからH1候補時刻を復元する関数
-//+------------------------------------------------------------------+
-datetime PendingOrderCandidateTime(const string comment)
-  {
-   int marker = StringFind(comment, "Z");
-   if(marker < 0)
-      return 0;
-
-   datetime candidate_at = 0;
-   string candidate_id = StringSubstr(comment, marker + 1, 12);
-   if(!TryParseTargetCandidateTime(candidate_id, candidate_at))
-      return 0;
-
-   return candidate_at;
-  }
-
-//+------------------------------------------------------------------+
 //| 分割slotが既存注文/ポジションに存在するか判定する関数
 //+------------------------------------------------------------------+
 bool HasExistingSplitSlot(const string slot_key)
@@ -662,7 +437,6 @@ bool CancelStaleSplitPendingOrders(const string current_candidate_id)
   {
    bool result = false;
    bool keep_current_candidate = (current_candidate_id != "" && current_candidate_id != "0");
-   CleanupPendingOrderCancelAttempts();
 
    for(int i = OrdersTotal() - 1; i >= 0; i--)
      {
@@ -682,8 +456,26 @@ bool CancelStaleSplitPendingOrders(const string current_candidate_id)
       if(keep_current_candidate && IsCurrentSplitCandidateComment(comment, current_candidate_id))
          continue;
 
-      if(TryCancelPendingOrder(ticket, "stale split comment=" + comment))
+      MqlTradeRequest request = {};
+      MqlTradeResult trade_result = {};
+      request.action = TRADE_ACTION_REMOVE;
+      request.order = ticket;
+
+      if(!OrderSend(request, trade_result))
+        {
+         Print("Failed to delete stale split order. Ticket: ", ticket, " Error: ", GetLastError());
+         continue;
+        }
+
+      if(trade_result.retcode == TRADE_RETCODE_DONE)
+        {
+         Print("Stale split order canceled. Ticket: ", ticket, " comment=", comment);
          result = true;
+        }
+      else
+        {
+         Print("Stale split order cancellation failed. Ticket: ", ticket, " Retcode: ", trade_result.retcode);
+        }
      }
 
    return result;
@@ -703,7 +495,6 @@ bool CancelStaleSplitPendingOrders(const string current_candidate_id)
 bool CancelExpiredOrders()
   {
    bool result = false;
-   CleanupPendingOrderCancelAttempts();
 
 // 未決済注文の数を取得
    for(int i = OrdersTotal() - 1; i >= 0; i--)
@@ -717,18 +508,33 @@ bool CancelExpiredOrders()
             continue;
 
          datetime open_time = (datetime)OrderGetInteger(ORDER_TIME_SETUP);
-         datetime reference_time = PendingOrderCandidateTime(OrderGetString(ORDER_COMMENT));
-         if(reference_time <= 0)
-            reference_time = open_time;
 
          int expiration_seconds = ENTRY_H1_LIMIT * PeriodSeconds(PERIOD_H1);
-         if(reference_time <= 0 || expiration_seconds <= 0)
+         if(open_time <= 0 || expiration_seconds <= 0)
             continue;
 
-         if(TimeCurrent() - reference_time >= expiration_seconds)
+         if(TimeCurrent() - open_time >= expiration_seconds)
            {
-            if(TryCancelPendingOrder(ticket, "H1 candidate expired"))
-               result = true;
+            MqlTradeRequest request = {};
+            MqlTradeResult trade_result = {};
+            request.action=TRADE_ACTION_REMOVE;                   // 取引操作タイプ
+            request.order = ticket;                         // 注文チケット
+            if(!OrderSend(request, trade_result))      // 削除リクエスト送信
+              {
+               Print("Failed to delete order. Ticket: ", ticket, " Error: ", GetLastError());
+              }
+            else
+              {
+               if(trade_result.retcode == TRADE_RETCODE_DONE)
+                 {
+                  Print("Order canceled successfully due to a time limit. Ticket: ", ticket);
+                  result = true; // 削除成功フラグ
+                 }
+               else
+                 {
+                  Print("Order cancellation failed. Ticket: ", ticket, " Retcode: ", trade_result.retcode);
+                 }
+              }
            }
         }
      }

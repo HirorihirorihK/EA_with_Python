@@ -199,22 +199,6 @@ string TargetCandidateAgeText(EAState &state)
   }
 
 //+------------------------------------------------------------------+
-//| pending注文コメントへ付与するH1候補IDを返す関数
-//+------------------------------------------------------------------+
-/**
- * @brief 復元済みのH1確定足時刻がある場合だけ候補IDをコメントへ付与します。
- */
-string TargetCandidateCommentSuffix(EAState &state)
-  {
-   if(state.target_candidate_at <= 0 ||
-      state.zone_candidate_id == "" ||
-      state.zone_candidate_id == "0")
-      return "";
-
-   return "Z" + state.zone_candidate_id;
-  }
-
-//+------------------------------------------------------------------+
 //| 許可された注文タイプだけを順番に送信する関数
 //+------------------------------------------------------------------+
 /**
@@ -283,10 +267,9 @@ string TwoDigit(const int value)
 //+------------------------------------------------------------------+
 //| 分割slot識別子を作る関数
 //+------------------------------------------------------------------+
-string SplitSlotKey(const int orderType, const string candidate_id, const int slot_index, const int split_count)
+string SplitSlotKey(const string candidate_id, const int slot_index, const int split_count)
   {
-   return "Z" + candidate_id + "#T" + IntegerToString(orderType) + "-" +
-          TwoDigit(slot_index) + "/" + TwoDigit(split_count);
+   return "Z" + candidate_id + "#" + TwoDigit(slot_index) + "/" + TwoDigit(split_count);
   }
 
 //+------------------------------------------------------------------+
@@ -499,7 +482,7 @@ int TrySendSplitEntryOrders(const int orderType, EAState &state, TickContext &ct
          break;
         }
 
-      string slot_key = SplitSlotKey(orderType, state.zone_candidate_id, slot, split_count);
+      string slot_key = SplitSlotKey(state.zone_candidate_id, slot, split_count);
       if(HasExistingSplitSlot(slot_key))
         {
          Print("[Split Skip] slot already exists. key=", slot_key);
@@ -520,7 +503,7 @@ int TrySendSplitEntryOrders(const int orderType, EAState &state, TickContext &ct
       Print("[Split ", entry_type, " Order Try] key=", slot_key,
             " en=", en, " tp=", tp, " sl=", sl, " volume=", volume);
 
-      if(SendOrder(orderType, en, tp, sl, volume, slot_key, TargetCandidateReferenceTime(state)))
+      if(SendOrder(orderType, en, tp, sl, volume, slot_key))
         {
          Print("[Split ", entry_type, " Order Sent] key=", slot_key,
                " en=", en, " tp=", tp, " sl=", sl, " volume=", volume);
@@ -585,8 +568,7 @@ bool TrySendEntryOrder(const int orderType, EAState &state, TickContext &ctx)
 
    Print("[", entry_type, " Order Try at ", cur_price, "] en=", en, " tp=", tp, " sl=", sl);
 
-   if(SendOrder(orderType, en, tp, sl, lot_size,
-                TargetCandidateCommentSuffix(state), TargetCandidateReferenceTime(state)))
+   if(SendOrder(orderType, en, tp, sl, lot_size, ""))
      {
       Print("[", entry_type, " Order Sent] ticket ok. en=", en, " tp=", tp, " sl=", sl);
       return true;
