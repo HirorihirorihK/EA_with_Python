@@ -20,7 +20,7 @@
 - `lot_size = 0.01`: Order volume.
 - `spread_limit = 60`: Maximum allowed spread in points.
 - `magic_number = 10001`: Magic number used to identify this EA's orders and positions.
-- `initial_order = 0`: Retained for compatibility with older settings. Startup always rebuilds H4/H1 results and remains in technical-error stop state until the H4 result is reloaded.
+- `initial_order = 0`: Enables initial H4/H1 processing on startup when set to `1`.
 - `input_position_limit = 10`: Practical limit for this EA's pending orders plus positions. Values above the internal `POSITION_LIMIT` are clamped.
 - `use_split_entry_zone = false`: Enables split entries based on H1 predicted zones.
 - `split_entry_count = 3`: Number of split entry orders, clamped to 1..10.
@@ -28,7 +28,6 @@
 - `split_total_lot_size = 0.09`: Total lot used by total-split mode.
 - `split_fixed_lot_size = 0.01`: Per-order lot used by fixed-split mode.
 - `cancel_old_split_pending_on_new_zone = true`: Cancels older split pending orders when a new H1 zone set is loaded.
-- `input_cancel_retry_cooldown_seconds = 60`: Wait time before retrying a failed pending-order cancellation for the same ticket. The effective value is clamped to 1..3600 seconds.
 - `use_m15_entry_filter = true`: Enables M15 closed-bar entry timing confirmation.
 - `m15_entry_zone_atr_multiplier = 1.50`: Allowed proximity multiplier based on the M15 average range.
 - `use_m15_imbalance_confirmation = true`: Adds M15 impulse confirmation for T1/T3 trend-following candidates.
@@ -149,7 +148,7 @@ New entries are allowed only when all conditions below are satisfied:
 - The order-type price relationship and broker minimum distance rules are satisfied.
 - When `use_m15_entry_filter = true`, T2/T4 satisfy the M15 direction, rejection, and proximity checks. T1/T3 satisfy M15 impulse confirmation when `use_m15_imbalance_confirmation = true`.
 - This EA's pending orders plus positions are below `input_position_limit`.
-- When split entries are enabled, `target_zones.txt` has `res_chk = 1`, the predicted zone prices are valid, split lots fit `SYMBOL_VOLUME_MIN/MAX/STEP`, and no duplicate order or position exists for the same `candidate_id` + order type + slot.
+- When split entries are enabled, `target_zones.txt` has `res_chk = 1`, the predicted zone prices are valid, split lots fit `SYMBOL_VOLUME_MIN/MAX/STEP`, and no duplicate order or position exists for the same `candidate_id` + slot.
 
 ### market_state and Allowed Order Types
 
@@ -161,8 +160,6 @@ New entries are allowed only when all conditions below are satisfied:
 - `5 MARKET_HIGH_VOL_DOWN`: Allows T3 Sell Stop / T4 Sell Limit.
 - `6 MARKET_TECHNICAL_ERROR_STOP`: Blocks new entries.
 
-After an H4 `market_state` reload, the EA cancels existing pending orders whose order types are not allowed by the refreshed state. For `6 MARKET_TECHNICAL_ERROR_STOP`, it cancels all pending orders managed by this EA.
-
 ### Order-Type Price Rules
 
 - T1 Buy Stop: `Ask < entry`, `tp > entry`, `sl < entry`
@@ -172,7 +169,7 @@ After an H4 `market_state` reload, the EA cancels existing pending orders whose 
 
 ## 7. Exit Conditions
 
-- Pending orders are cancelled after `ENTRY_H1_LIMIT * PeriodSeconds(PERIOD_H1)` has elapsed from the H1 candidate time restored from the comment. Legacy orders without that token fall back to setup time.
+- Pending orders are cancelled after `ENTRY_H1_LIMIT * PeriodSeconds(PERIOD_H1)` has elapsed from setup time.
 - Positions are closed after `CLOSE_H1_LIMIT * PeriodSeconds(PERIOD_H1)` has elapsed from entry time.
 - Time-limit handling runs early in `OnTick` and is independent of Python readiness or spread checks.
 - On EA removal, `OnDeinit()` releases external-process state and the SLTP panel, then clears the chart status text with `Comment("")` and `ChartRedraw(0)`.
@@ -194,13 +191,10 @@ After an H4 `market_state` reload, the EA cancels existing pending orders whose 
 - `input_position_limit` counts only this EA's orders and positions, not the full account. The hard internal limit is `POSITION_LIMIT`.
 - The EA selects the filling policy from `SYMBOL_FILLING_MODE`, preferring IOC, then FOK, then RETURN.
 - Before sending either single or split orders, the EA verifies the requested lot against `SYMBOL_VOLUME_MIN/MAX/STEP`.
-- Pending orders receive server-side expiration from the H1 candidate time when the broker supports it. Orders are skipped if that expiration is already in the past.
+- Pending orders receive server-side expiration when the broker supports it.
 - `OrderSend` return values and `MqlTradeResult.retcode` are checked. Failures are logged with `GetLastError()` or the retcode.
-- Single and split order comments keep a valid `candidate_id` for candidate-origin expiration handling.
-- Split-entry order comments also include order type and slot number to prevent duplicate execution of the same strategy slot.
+- Split-entry order comments include `candidate_id` and slot number to prevent duplicate slot execution.
 - When `cancel_old_split_pending_on_new_zone = true`, a new valid `candidate_id` cancels older split pending orders, and an invalid or stopped `target_zones.txt` cancels all existing split pending orders for this EA/symbol/magic.
-- After an H4 state update, existing pending orders that contradict the refreshed `market_state` are cancelled.
-- A failed pending-order cancellation is not retried for the same ticket until `input_cancel_retry_cooldown_seconds` has elapsed, preventing excessive per-tick trade-server requests.
 - SLTP management only targets existing positions matching `_Symbol` and `magic_number`, and it preserves each position's current TP.
 - SL changes are sent only when the candidate improves protection relative to the current SL and satisfies broker stop-level and freeze-level constraints.
 - `HighVolatilityLimit()` evaluates BUY positions with Bid and SELL positions with Ask, and treats GOLD/XAUUSD suffix symbols as 1 pip = 0.1.
@@ -209,26 +203,12 @@ After an H4 `market_state` reload, the EA cancels existing pending orders whose 
 
 - If `trend_state.txt` is missing, unreadable, not strictly parseable as an integer, or outside `0..6`, the EA uses `MARKET_TECHNICAL_ERROR_STOP`.
 - If `target_prices.txt` is missing, unreadable, shorter than 13 lines, or contains a non-strict numeric line, the EA uses `res_chk = 0`.
-- When split entries are enabled, missing `target_zones.txt`, schema mismatch, fewer than 7 lines, `res_chk != 1`, a valid-zone `candidate_id` that is not a strict 12-digit timestamp, or non-strict numeric values stop new split orders.
-- When Python falls back to H1 safe-stop values, it appends `RESULT: SAFE_STOP`, the stop stage, reason, H4 state, and candidate ID to `debug_entry.txt`. This distinguishes a normal GPT skip from API, configuration, or data failures.
+- When split entries are enabled, missing `target_zones.txt`, schema mismatch, fewer than 7 lines, `res_chk != 1`, or non-strict numeric values stop new split orders.
 - If a Python process exits with a non-zero code, the code is logged and the next trigger may retry.
 - If a Python process remains active beyond `PYTHON_TIMEOUT_SECONDS`, the EA runs `taskkill /T /F` against the cmd/bat process tree, clears done/running files, and allows the next trigger to retry.
 - If only a stale running marker remains, the EA attempts PID recovery. If recovery fails and the marker is timed out, it removes the stale marker.
 
 ## 10. Changelog
-
-### 2026-06-01
-
-- Added `debug_entry.txt` safe-stop diagnostics with the stop stage and reason so normal candidate skips can be distinguished from guarded failure fallbacks.
-
-### 2026-05-31
-
-- Changed startup initialization to rebuild H4/H1 results regardless of `initial_order`, while holding the technical-error stop state until the H4 result reloads.
-- Added cancellation of existing pending orders that contradict a refreshed H4 `market_state`.
-- Added per-ticket cooldown after failed pending-order cancellation to prevent excessive per-tick trade-server requests.
-- Added order type to split-slot identifiers so different strategies using the same `candidate_id` and slot cannot collide.
-- Kept valid `candidate_id` tokens in both single and split order comments and changed pending expiration to use the H1 candidate origin time.
-- Required strict 12-digit timestamp `candidate_id` values for valid `target_zones.txt`; malformed values now stop safely.
 
 ### 2026-05-30
 

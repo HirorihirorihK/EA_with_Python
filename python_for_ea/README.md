@@ -92,7 +92,8 @@ MT5 が読む結果ファイルは `utf-16 LE` で出力します。結果ファ
 3. H1 の短期 36 本、中期 72 本からチャート PNG と数値要約を作る。
 4. H1 インバランス初動を Python 側で判定し、矛盾する候補を抑止する。
 5. OpenAI Responses API に候補価格・予測ゾーン生成を依頼する。
-6. GPT 出力を既存13行形式と分割エントリー用ゾーン形式へ展開し、価格の大小関係と距離を検証する。
+   出力は Structured Outputs のJSON Schemaで固定する。
+6. GPT JSON出力を既存13行形式と分割エントリー用ゾーン形式へ展開し、価格の大小関係、距離、reward/riskを検証する。
 7. `target_prices.txt` と `target_zones.txt` を書き、両方の完了後に `process_done_entry.txt` を作成する。
 
 H4 状態ごとの許可戦略:
@@ -132,6 +133,9 @@ EA側で分割エントリーを有効にした場合は、この予測ゾーン
 ## OpenAI 設定
 
 H1 エントリー候補生成では OpenAI API を使用します。
+Responses APIの `text.format` にJSON Schemaを渡し、GPT出力を自然文やCSV風テキストではなく
+`schema_version` と `strategies` を持つ構造化JSONに固定します。
+JSONが不正、API応答が未完了、価格条件やreward/risk条件に合わない場合は停止値へ倒します。
 
 必須:
 

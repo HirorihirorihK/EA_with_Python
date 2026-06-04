@@ -103,31 +103,3 @@ def append_debug_entry(
         file.write("---- REASON START ----\n")
         file.write((reason_text or "").strip() + "\n")
         file.write("---- REASON END ----\n\n")
-
-
-def append_debug_entry_stop(
-    *,
-    path: Path,
-    stage: str,
-    reason: str,
-    trend_state: int,
-    selected_strategies: Sequence[int] = (),
-    candidate_id: str = "",
-    current_price: float | None = None,
-    imbalance_summary: str = "",
-) -> None:
-    """H1候補生成が安全側停止値へ倒れた理由を追記する。"""
-    with path.open("a", encoding="utf-8") as file:
-        file.write("=" * 60 + "\n")
-        file.write(f"DEBUG TIME        : {now_str()}\n")
-        file.write("RESULT            : SAFE_STOP\n")
-        file.write(f"STAGE             : {stage}\n")
-        file.write(f"REASON            : {reason}\n")
-        file.write(f"MARKET_STATE(H4)  : {trend_state} ({MARKET_STATE_LABELS.get(trend_state, 'UNKNOWN')})\n")
-        file.write(f"SELECTED_STRATEGY : {','.join(str(x) for x in selected_strategies) or '-'}\n")
-        file.write(f"CANDIDATE_ID      : {candidate_id or '-'}\n")
-        if current_price is not None:
-            file.write(f"CURRENT PRICE     : {current_price:.2f}\n")
-        if imbalance_summary:
-            file.write(f"IMBALANCE(H1)     : {imbalance_summary}\n")
-        file.write("=" * 60 + "\n\n")

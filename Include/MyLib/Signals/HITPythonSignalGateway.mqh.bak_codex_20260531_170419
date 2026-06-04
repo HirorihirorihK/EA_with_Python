@@ -218,23 +218,25 @@ bool TryParseStrictDouble(const string value, double &parsed)
 //| H1候補IDを安全な12桁時刻トークンへ正規化する関数
 //+------------------------------------------------------------------+
 /**
- * @brief Pythonから受け取ったcandidate_idが厳格な12桁数字の場合だけ採用します。
+ * @brief Pythonから受け取ったcandidate_idを注文コメントに使える数字だけへ丸めます。
  */
 string NormalizeTargetCandidateId(const string value)
   {
    string text = TrimText(value);
+   string output = "";
    int length = StringLen(text);
-   if(length != 12)
-      return "0";
 
-   for(int i = 0; i < length; i++)
+   for(int i = 0; i < length && StringLen(output) < 12; i++)
      {
       int ch = StringGetCharacter(text, i);
-      if(!IsDecimalDigit(ch))
-         return "0";
+      if(IsDecimalDigit(ch))
+         output += StringSubstr(text, i, 1);
      }
 
-   return text;
+   if(StringLen(output) <= 0)
+      return "0";
+
+   return output;
   }
 
 //+------------------------------------------------------------------+
@@ -404,13 +406,11 @@ bool GetTrendState(EAState &state)
    if(ProcessDone && g_ea.load_trend_flg)
      {
       int trend_state;
-       LoadTrendState(trend_state);
-       state.trend_state = trend_state;
-       Print("market_state: ", state.trend_state, " (", MarketStateName(state.trend_state), ")");
-       CancelPendingOrdersNotAllowedByTrend(state.trend_state);
-       g_init_entry_pending = true; // Rebuild H1 candidates from the refreshed H4 state.
-       g_ea.load_trend_flg = false;
-       g_ea.last_trend_update = TimeLocal();
+      LoadTrendState(trend_state);
+      state.trend_state = trend_state;
+      Print("market_state: ", state.trend_state, " (", MarketStateName(state.trend_state), ")");
+      g_ea.load_trend_flg = false;
+      g_ea.last_trend_update = TimeLocal();
      }
    return true;
   }
@@ -685,13 +685,6 @@ void LoadTargetZones(EAState &state)
          datetime candidate_at = 0;
          if(TryParseTargetCandidateTime(state.zone_candidate_id, candidate_at))
             state.target_candidate_at = candidate_at;
-         else if(state.zone_res_chk == 1)
-            {
-             Print("target_zones invalid candidate_id: ", line);
-             FileClose(filehandle);
-             ResetTargetZones(state);
-             return;
-            }
          else
             state.target_candidate_at = 0;
          continue;

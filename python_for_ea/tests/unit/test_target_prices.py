@@ -6,6 +6,7 @@ from ea_py.market.target_prices import parse_lines_to_13_allow_subset, sanitize_
 from ea_py.market.target_zones import (
     build_candidate_id,
     format_target_zones,
+    parse_json_to_entry_zones,
     parse_lines_to_entry_zones_allow_subset,
     sanitize_entry_zones,
     zones_to_numeric_list,
@@ -74,6 +75,51 @@ def test_parse_lines_to_entry_zones_allow_subset_valid_zone_returns_zone_values(
     assert actual[2].zone_high == 1898.0
 
 
+def test_parse_json_to_entry_zones_valid_structured_output_returns_zone_values() -> None:
+    """Structured OutputsのJSON候補を戦略別ゾーンへ展開する。"""
+    actual = parse_json_to_entry_zones(
+        """
+        {
+          "schema_version": 1,
+          "strategies": [
+            {
+              "strategy": 2,
+              "decision": "use",
+              "entry": 1895.0,
+              "tp": 1910.0,
+              "sl": 1885.0,
+              "zone_low": 1892.0,
+              "zone_high": 1898.0,
+              "reason_code": "range_edge"
+            },
+            {
+              "strategy": 4,
+              "decision": "skip",
+              "entry": 0.0,
+              "tp": 0.0,
+              "sl": 0.0,
+              "zone_low": 0.0,
+              "zone_high": 0.0,
+              "reason_code": "skip_mid_range"
+            }
+          ]
+        }
+        """
+    )
+
+    assert actual[2].entry == 1895.0
+    assert actual[2].zone_low == 1892.0
+    assert actual[2].zone_high == 1898.0
+    assert actual[4].entry == 0.0
+
+
+def test_parse_json_to_entry_zones_invalid_json_returns_stop_values() -> None:
+    """不正JSONは全停止ゾーンへ倒す。"""
+    actual = parse_json_to_entry_zones("2,1895.00,1910.00,1885.00,1892.00,1898.00")
+
+    assert all(zone.entry == 0.0 for zone in actual.values())
+
+
 def test_sanitize_entry_zones_invalid_unselected_strategy_zeroes_it() -> None:
     """未選択戦略のゾーンは停止値へ補正する。"""
     parsed = parse_lines_to_entry_zones_allow_subset(
@@ -94,6 +140,20 @@ def test_sanitize_entry_zones_allows_near_zone_edge_when_entry_is_farther() -> N
     actual = sanitize_entry_zones(parsed, selected_strategies=[2], current_price=1900.0, max_entry_distance=5.0)
 
     assert actual[2].entry == 1890.0
+
+
+def test_sanitize_entry_zones_rejects_low_reward_risk_ratio() -> None:
+    """reward/riskが閾値未満の候補は停止値へ補正する。"""
+    parsed = parse_lines_to_entry_zones_allow_subset("2,1895.00,1900.00,1885.00,1892.00,1898.00")
+
+    actual = sanitize_entry_zones(
+        parsed,
+        selected_strategies=[2],
+        current_price=1900.0,
+        min_reward_risk_ratio=1.2,
+    )
+
+    assert actual[2].entry == 0.0
 
 
 def test_zones_to_numeric_list_valid_zone_returns_legacy_13_values() -> None:
