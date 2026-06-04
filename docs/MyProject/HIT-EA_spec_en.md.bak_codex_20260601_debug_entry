@@ -210,16 +210,11 @@ After an H4 `market_state` reload, the EA cancels existing pending orders whose 
 - If `trend_state.txt` is missing, unreadable, not strictly parseable as an integer, or outside `0..6`, the EA uses `MARKET_TECHNICAL_ERROR_STOP`.
 - If `target_prices.txt` is missing, unreadable, shorter than 13 lines, or contains a non-strict numeric line, the EA uses `res_chk = 0`.
 - When split entries are enabled, missing `target_zones.txt`, schema mismatch, fewer than 7 lines, `res_chk != 1`, a valid-zone `candidate_id` that is not a strict 12-digit timestamp, or non-strict numeric values stop new split orders.
-- When Python falls back to H1 safe-stop values, it appends `RESULT: SAFE_STOP`, the stop stage, reason, H4 state, and candidate ID to `debug_entry.txt`. This distinguishes a normal GPT skip from API, configuration, or data failures.
 - If a Python process exits with a non-zero code, the code is logged and the next trigger may retry.
 - If a Python process remains active beyond `PYTHON_TIMEOUT_SECONDS`, the EA runs `taskkill /T /F` against the cmd/bat process tree, clears done/running files, and allows the next trigger to retry.
 - If only a stale running marker remains, the EA attempts PID recovery. If recovery fails and the marker is timed out, it removes the stale marker.
 
 ## 10. Changelog
-
-### 2026-06-01
-
-- Added `debug_entry.txt` safe-stop diagnostics with the stop stage and reason so normal candidate skips can be distinguished from guarded failure fallbacks.
 
 ### 2026-05-31
 
