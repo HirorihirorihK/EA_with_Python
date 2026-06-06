@@ -4,7 +4,7 @@
 
 このドキュメントは、MT5データフォルダ配下の `MQL5\python_for_ea` のフォルダ構成に関する正本である。
 
-現在のプロジェクトは、MT5 HIT-EAから出力されたOHLC CSVをPythonで解析し、OpenAI APIを使ってGOLD/XAUUSD向けの相場環境とエントリー候補価格を返す補助アプリケーションである。
+現在のプロジェクトは、MT5 HIT-EAから出力されたOHLC CSVをPythonで解析し、GOLD/XAUUSD向けのH4相場環境とH1エントリー候補価格を返す補助アプリケーションである。H4相場環境はルールベースで判定し、H1エントリー候補価格のみOpenAI APIを使う。
 
 MT5 EAから `bat/` 経由でルート直下のPythonスクリプトが呼ばれているため、現時点ではルート直下の `get_trend_reply.py` と `get_entry_reply.py` を実行入口として維持する。
 
@@ -197,7 +197,7 @@ EAファイルはこのPythonプロジェクトの外部連携先として扱う
 
 | モジュール | 責務 |
 |---|---|
-| `src/ea_py/config.py` | 環境変数、モデル名、デバッグ設定などの設定読み込み。 |
+| `src/ea_py/config.py` | 環境変数、GPT-5.5モデル名、reasoning effort、text verbosity、デバッグ設定などの設定読み込み。 |
 | `src/ea_py/paths.py` | MT5データフォルダ、入力CSV、出力ファイルパスの組み立て。 |
 | `src/ea_py/constants.py` | `market_state`、ATR期間、出力サイズなどの定数。 |
 | `src/ea_py/types.py` | OHLCバー、OHLC要約、13行出力などの型定義。 |
@@ -212,7 +212,7 @@ EAファイルはこのPythonプロジェクトの外部連携先として扱う
 | `src/ea_py/market/imbalance.py` | H1インバランス初動判定。 |
 | `src/ea_py/prompts/trend_prompt.py` | H4相場環境判定プロンプトの生成。 |
 | `src/ea_py/prompts/entry_prompt.py` | H1候補価格生成プロンプトの生成。 |
-| `src/ea_py/openai_client.py` | OpenAI API呼び出しの薄いラッパー。 |
+| `src/ea_py/openai_client.py` | GPT-5.5向けのResponses API呼び出し、reasoning/text設定、Structured Outputs指定をまとめる薄いラッパー。 |
 | `src/ea_py/pipelines/trend_pipeline.py` | H4判定処理全体のオーケストレーション。 |
 | `src/ea_py/pipelines/entry_pipeline.py` | H1候補生成処理全体のオーケストレーション。 |
 

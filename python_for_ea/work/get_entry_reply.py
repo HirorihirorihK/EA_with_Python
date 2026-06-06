@@ -22,7 +22,9 @@ YOUR_API_KEY = os.getenv("OPENAI_API_KEY")
 if YOUR_API_KEY is None:
     raise RuntimeError("OPENAI_API_KEY が環境変数に設定されていません。")
 
-gpt_model = "gpt-5.4"
+gpt_model = "gpt-5.5"
+reasoning_effort = os.getenv("OPENAI_REASONING_EFFORT", "low")
+text_verbosity = os.getenv("OPENAI_TEXT_VERBOSITY", "low")
 
 # =========================
 # 入出力ファイル
@@ -355,7 +357,8 @@ def call_gpt(client, model, system_content: str, user_text: str, images_data_url
             {"role": "system", "content": system_content},
             {"role": "user", "content": content_parts},
         ],
-        temperature=0.0,
+        reasoning={"effort": reasoning_effort},
+        text={"verbosity": text_verbosity},
         max_output_tokens=max_output_tokens,
     )
     return resp.output_text or ""
@@ -440,6 +443,8 @@ def write_debug_entry(
             f.write("=" * 60 + "\n")
             f.write(f"DEBUG TIME        : {_now_str()}\n")
             f.write(f"MODEL             : {gpt_model}\n")
+            f.write(f"REASONING         : {reasoning_effort}\n")
+            f.write(f"VERBOSITY         : {text_verbosity}\n")
             f.write(f"TIMEFRAME         : {timeframe}\n")
             f.write(f"TREND_STATE(H4)   : {trend_state} (0=RANGE,1=UP,2=DOWN)\n")
             f.write(f"SELECTED_STRATEGY : {','.join(str(x) for x in selected_strategies)}\n")

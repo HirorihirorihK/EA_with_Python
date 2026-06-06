@@ -4,9 +4,11 @@ from __future__ import annotations
 
 MT_ENCODING = "utf-16 LE"
 
-DEFAULT_GPT_MODEL = "gpt-5.5-2026-04-23"
+DEFAULT_GPT_MODEL = "gpt-5.5"
 DEFAULT_REASONING_EFFORT = "low"
 VALID_REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh"})
+DEFAULT_TEXT_VERBOSITY = "low"
+VALID_TEXT_VERBOSITIES = frozenset({"low", "medium", "high"})
 DEBUG_PRINT = True
 ENTRY_RESPONSE_SCHEMA_VERSION = 1
 

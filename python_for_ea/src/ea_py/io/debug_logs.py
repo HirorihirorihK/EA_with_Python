@@ -60,6 +60,7 @@ def append_debug_entry(
     path: Path,
     model: str,
     reasoning_effort: str,
+    text_verbosity: str,
     max_output_tokens: int,
     api_diagnostics: str,
     timeframe: str,
@@ -79,6 +80,7 @@ def append_debug_entry(
         file.write(f"DEBUG TIME        : {now_str()}\n")
         file.write(f"MODEL             : {model}\n")
         file.write(f"REASONING         : {reasoning_effort}\n")
+        file.write(f"VERBOSITY         : {text_verbosity}\n")
         file.write(f"MAX TOKENS        : {max_output_tokens}\n")
         file.write(f"TIMEFRAME         : {timeframe}\n")
         file.write(f"MARKET_STATE(H4)  : {trend_state} ({MARKET_STATE_LABELS.get(trend_state, 'UNKNOWN')})\n")

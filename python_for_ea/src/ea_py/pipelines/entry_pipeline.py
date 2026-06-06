@@ -323,6 +323,7 @@ def run_pipeline() -> None:
             image_data_urls=images_data_urls,
             max_output_tokens=max_tokens,
             response_text_format=response_text_format,
+            text_verbosity=config.text_verbosity,
         )
         gpt_reply = gpt_result.text
         api_diagnostics = gpt_result.diagnostics.to_log_text()
@@ -378,6 +379,7 @@ def run_pipeline() -> None:
                 path=paths.debug_reason,
                 model=config.model,
                 reasoning_effort=config.reasoning_effort,
+                text_verbosity=config.text_verbosity,
                 max_output_tokens=max_tokens,
                 api_diagnostics=api_diagnostics,
                 timeframe=ENTRY_TIMEFRAME,

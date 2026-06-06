@@ -108,6 +108,8 @@ When no prefix is provided, such as manual Python execution, Python keeps using 
 - Running marker: `<prefix>_process_running_entry.txt`
 - Batch file: `<TerminalDataPath>\MQL5\python_for_ea\bat\get_entry_reply.bat`
 
+H1 candidate generation uses the OpenAI Responses API. The default model is `gpt-5.5`, the default `reasoning.effort` is `low`, and the default `text.verbosity` is `low`. `temperature` is not set. Runtime overrides are available through `OPENAI_MODEL`, `OPENAI_REASONING_EFFORT`, and `OPENAI_TEXT_VERBOSITY`. Output is validated with `text.format` Structured Outputs JSON Schema; incomplete responses, schema mismatches, price-rule failures, and insufficient reward/risk fall back to safe-stop values.
+
 During `OnInit()`, the EA resolves `MQL5\python_for_ea` from `TerminalInfoString(TERMINAL_DATA_PATH)` and builds absolute batch-file paths. Each batch file resolves the Python project root from its own location, so runtime execution no longer depends on `C:\ea_py`.
 
 `target_prices.txt` must contain 13 lines:
@@ -216,6 +218,11 @@ After an H4 `market_state` reload, the EA cancels existing pending orders whose 
 - If only a stale running marker remains, the EA attempts PID recovery. If recovery fails and the marker is timed out, it removes the stale marker.
 
 ## 10. Changelog
+
+### 2026-06-06
+
+- Updated the Python-side OpenAI default model to the official `gpt-5.5` slug and made Responses API calls send explicit `reasoning.effort` and `text.verbosity`. For GPT-5.5, the output contract is now documented as primarily enforced by Structured Outputs rather than duplicated prompt schema text.
+- Added compatibility declarations to `HIT-EA_refactor_ver5.mq5` so it compiles against the current shared headers, covering split-entry zones, Python linkage filenames, and pending-cancel retry tracking. Since `use_split_entry_zone = false` by default, the normal ver5 entry behavior remains unchanged.
 
 ### 2026-06-01
 
