@@ -133,7 +133,9 @@ EA側で分割エントリーを有効にした場合は、この予測ゾーン
 ## OpenAI 設定
 
 H1 エントリー候補生成では OpenAI API を使用します。
-Responses APIの `text.format` にJSON Schemaを渡し、GPT出力を自然文やCSV風テキストではなく
+既定モデルは `gpt-5.5` です。Responses APIへ `reasoning.effort` と
+`text.verbosity` を明示して送り、`temperature` は使用しません。
+`text.format` にはJSON Schemaを渡し、GPT出力を自然文やCSV風テキストではなく
 `schema_version` と `strategies` を持つ構造化JSONに固定します。
 JSONが不正、API応答が未完了、価格条件やreward/risk条件に合わない場合は停止値へ倒します。
 
@@ -146,13 +148,14 @@ $env:OPENAI_API_KEY = "..."
 任意:
 
 ```powershell
-$env:OPENAI_MODEL = "..."
+$env:OPENAI_MODEL = "gpt-5.5"
 $env:OPENAI_REASONING_EFFORT = "low"
+$env:OPENAI_TEXT_VERBOSITY = "low"
 $env:MT5_EA_FILE_PREFIX = "HIT_GOLD_10001"
 $env:MT5_PRICE_DIGITS = "2"
 ```
 
-`OPENAI_MODEL` 未設定時は `src/ea_py/constants.py` の `DEFAULT_GPT_MODEL` を使います。`OPENAI_REASONING_EFFORT` は `none`, `low`, `medium`, `high`, `xhigh` のいずれかです。`MT5_EA_FILE_PREFIX` と `MT5_PRICE_DIGITS` は手動実行時だけ指定すればよく、EA/bat経由では自動設定されます。
+`OPENAI_MODEL` 未設定時は `src/ea_py/constants.py` の `DEFAULT_GPT_MODEL` を使います。`OPENAI_REASONING_EFFORT` は `none`, `low`, `medium`, `high`, `xhigh` のいずれかです。H1候補生成の既定は低遅延と再現性確認のため `low` ですが、品質優先の検証では `medium` も評価してください。`OPENAI_TEXT_VERBOSITY` は `low`, `medium`, `high` のいずれかで、既定はJSON専用応答に合わせて `low` です。`MT5_EA_FILE_PREFIX` と `MT5_PRICE_DIGITS` は手動実行時だけ指定すればよく、EA/bat経由では自動設定されます。
 
 ## 主なモジュール
 

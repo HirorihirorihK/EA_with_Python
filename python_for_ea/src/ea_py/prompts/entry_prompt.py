@@ -320,13 +320,11 @@ def build_common_rules_block(
 - エントリー後12時間以内に利確・損切に到達しなければ、その時点の価格でクローズ。
 
 【出力ルール（最重要）】
-- Responses APIのJSON Schemaに一致するJSONオブジェクトだけを出力してください。
+- Responses APIのStructured Outputs(JSON Schema)で検証されるJSONオブジェクトだけを出力してください。
 - schema_version は {ENTRY_RESPONSE_SCHEMA_VERSION}。
 - strategies には対象戦略だけを入れ、順序は {out_order}。
-- 各strategy要素は strategy, decision, entry, tp, sl, zone_low, zone_high, reason_code を必ず含めてください。
-- decision は "use" または "skip" のみ。
-- reason_code は次のいずれかのみ: {", ".join(ENTRY_REASON_CODES)}
-- 自然文、Markdown、余分なキー、空行は一切出力しないでください。
+- decision は "use" または "skip"、reason_code は次のいずれかのみ: {", ".join(ENTRY_REASON_CODES)}
+- 自然文、Markdown、空行は一切出力しないでください。
 """.strip()
 
 

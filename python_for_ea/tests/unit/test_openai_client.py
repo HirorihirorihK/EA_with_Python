@@ -23,7 +23,7 @@ class FakeResponse:
 
     def __init__(self, *, output_text: str, incomplete_details: object | None = None) -> None:
         self.output_text = output_text
-        self.model = "gpt-5.5-2026-04-23"
+        self.model = "gpt-5.5"
         self.status = "completed"
         self.incomplete_details = incomplete_details
         self.error = None
@@ -50,23 +50,25 @@ class FakeClient:
         self.responses = FakeResponsesResource(response)
 
 
-def test_call_responses_api_sends_reasoning_and_omits_temperature() -> None:
-    """GPT-5.5 requests should use reasoning controls instead of temperature."""
+def test_call_responses_api_sends_reasoning_text_controls_and_omits_temperature() -> None:
+    """GPT-5.5 requests should use reasoning/text controls instead of temperature."""
     fake_client = FakeClient(FakeResponse(output_text=" 0\n"))
 
     actual = call_responses_api(
         client=fake_client,  # type: ignore[arg-type]
-        model="gpt-5.5-2026-04-23",
+        model="gpt-5.5",
         reasoning_effort="none",
         system_content="Return one number.",
         user_text="Classify.",
         image_data_urls=[],
         max_output_tokens=128,
+        text_verbosity="low",
     )
 
     assert actual.text == "0"
     assert fake_client.responses.create_params["reasoning"] == {"effort": "none"}
     assert fake_client.responses.create_params["max_output_tokens"] == 128
+    assert fake_client.responses.create_params["text"] == {"verbosity": "low"}
     assert "temperature" not in fake_client.responses.create_params
 
 
@@ -87,17 +89,21 @@ def test_call_responses_api_sends_structured_text_format() -> None:
 
     actual = call_responses_api(
         client=fake_client,  # type: ignore[arg-type]
-        model="gpt-5.5-2026-04-23",
+        model="gpt-5.5",
         reasoning_effort="low",
         system_content="Return JSON.",
         user_text="Classify.",
         image_data_urls=[],
         max_output_tokens=128,
         response_text_format=response_text_format,
+        text_verbosity="low",
     )
 
     assert actual.text.startswith("{")
-    assert fake_client.responses.create_params["text"] == {"format": response_text_format}
+    assert fake_client.responses.create_params["text"] == {
+        "format": response_text_format,
+        "verbosity": "low",
+    }
 
 
 def test_call_responses_api_returns_incomplete_diagnostics_for_empty_text() -> None:
@@ -111,7 +117,7 @@ def test_call_responses_api_returns_incomplete_diagnostics_for_empty_text() -> N
 
     actual = call_responses_api(
         client=fake_client,  # type: ignore[arg-type]
-        model="gpt-5.5-2026-04-23",
+        model="gpt-5.5",
         reasoning_effort="low",
         system_content="Return one number.",
         user_text="Classify.",

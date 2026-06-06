@@ -94,6 +94,7 @@ def call_responses_api(
     image_data_urls: Sequence[str],
     max_output_tokens: int,
     response_text_format: Mapping[str, Any] | None = None,
+    text_verbosity: str | None = None,
 ) -> ResponsesApiResult:
     """Responses APIへテキストとチャート画像を送り、出力テキストを返す。
 
@@ -103,6 +104,7 @@ def call_responses_api(
 
     `response_text_format` が指定された場合は Responses API の `text.format` へ渡し、
     JSON Schemaなどの構造化出力をAPI側でも強制する。
+    `text_verbosity` はGPT-5.5の最終出力長を制御し、reasoning品質とは独立して扱う。
 
     戻り値は `response.output_text` をstripした文字列とAPI診断情報。
     API例外や空/不正な出力の安全側処理は、この薄いラッパーではなく
@@ -129,8 +131,13 @@ def call_responses_api(
         "reasoning": {"effort": reasoning_effort},
         "max_output_tokens": max_output_tokens,
     }
+    text_config: dict[str, Any] = {}
     if response_text_format is not None:
-        create_params["text"] = {"format": dict(response_text_format)}
+        text_config["format"] = dict(response_text_format)
+    if text_verbosity is not None:
+        text_config["verbosity"] = text_verbosity
+    if text_config:
+        create_params["text"] = text_config
 
     response = client.responses.create(**create_params)
     diagnostics = _extract_response_diagnostics(response)
