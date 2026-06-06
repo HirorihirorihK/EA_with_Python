@@ -21,6 +21,7 @@
 #define WAIT_OBJECT_0                     0
 #define WAIT_TIMEOUT                      258
 #define STILL_ACTIVE                      259
+#define TASKKILL_WAIT_MILLISECONDS        5000
 
 struct STARTUPINFO_W
   {
@@ -63,14 +64,18 @@ long OpenProcess(uint dwDesiredAccess, int bInheritHandle, uint dwProcessId);
 // バッチファイルのパス
 string get_trend_reply_bat = "C:\\ea_py\\bat\\get_trend_reply.bat"; // H4: trend
 string get_entry_reply_bat = "C:\\ea_py\\bat\\get_entry_reply.bat"; // H1: entry
+string mt5_file_prefix     = ""; // Python linkage file namespace
 
 // プロセス完了ファイルの設定
 string done_trend_file = "process_done_trend.txt";
 string done_entry_file = "process_done_entry.txt";
 
 // Python出力ファイル
+string ohlc_h4_file = "ohlc_H4.csv";
+string ohlc_h1_file = "ohlc_H1.csv";
 string trend_state_file = "trend_state.txt";
 string target_prices_file = "target_prices.txt";
+string target_zones_file = "target_zones.txt";
 
 // Python実行中を判定するための管理ファイル
 string running_trend_file = "process_running_trend.txt";
@@ -82,11 +87,25 @@ string running_entry_file = "process_running_entry.txt";
 //| インプットの設定
 //+------------------------------------------------------------------+
 
+enum SplitLotMode
+  {
+   SPLIT_LOT_TOTAL = 0, // Split total volume into N orders
+   SPLIT_LOT_FIXED = 1  // Use fixed volume per split order
+  };
+
 //--- 入力パラメータ
 input double lot_size      = 0.01;  // ロット数
 input double spread_limit  = 60;    // 許容スプレッド(point)
 input int    magic_number  = 10001; // マジックナンバー
 input int    initial_order = 0;     // 起動時の注文(0:なし, 1:あり)
+input int    input_position_limit = 48; // 自EAの未約定注文+ポジション上限
+input bool   use_split_entry_zone = false; // H1予測ゾーンで分割エントリーする
+input int    split_entry_count = 3; // 分割エントリー本数(1..10)
+input SplitLotMode split_lot_mode = SPLIT_LOT_TOTAL; // 分割ロット配分モード
+input double split_total_lot_size = 0.09; // 総量分割モードの合計ロット
+input double split_fixed_lot_size = 0.01; // 固定ロットモードの1注文ロット
+input bool   cancel_old_split_pending_on_new_zone = true; // 新ゾーン読込時に旧分割pendingを取消
+input int    input_cancel_retry_cooldown_seconds = 60; // pending取消失敗時のticket単位再試行間隔
 input bool   use_m15_entry_filter = true;  // M15確定足で発注タイミングを確認
 input double m15_entry_zone_atr_multiplier = 1.50; // M15平均レンジ何本分まで候補価格への接近を許可
 input bool   use_m15_imbalance_confirmation = true; // T1/T3でM15初動確認を追加
@@ -128,6 +147,7 @@ ulong  slippage      = 10;          // スリッページ
 #define ENTRY_RETRY_LIMIT      10
 // ANALYZE_TIMEFRAME は削除（H4/H1 両方使うため定数ではなく直接指定）
 #define TARGET_SIZE           13
+#define TARGET_ZONE_SCHEMA_VERSION 2
 #define DEFAULT_TARGET_PRICE  0.0
 #define PYTHON_TIMEOUT_SECONDS 600       // Python完了待ちの上限（秒）
 
@@ -152,12 +172,19 @@ struct EAState
    double            en_price[5];           // エントリー基準価格
    double            tp_price[5];           // 利益確定価格
    double            sl_price[5];           // ロスカット基準価格
+   int               zone_res_chk;          // 予測ゾーンが正しく取得できたか
+   string            zone_candidate_id;      // H1確定足由来の候補ID
+   double            zone_low[5];           // 分割エントリー用ゾーン下限
+   double            zone_high[5];          // 分割エントリー用ゾーン上限
+   double            zone_tp[5];            // 分割エントリー用TP
+   double            zone_sl[5];            // 分割エントリー用SL
    bool              load_trend_flg;        // ★変更：トレンドを更新するタイミングか
    bool              load_target_flg;       // ★変更：ターゲット価格を更新するタイミングか
    int               chk_cnt;               // エントリー判定の試行回数
    datetime          last_trend_update;     // ★追加：前回トレンドを更新した時刻
    datetime          last_target_update;    // ★変更：前回ターゲット価格を更新した時刻
    datetime          target_loaded_at;      // H1候補価格をEAへ読み込んだサーバー時刻
+   datetime          target_candidate_at;   // H1候補価格の元になった確定足時刻
    datetime          last_chk;
   };
 
@@ -174,6 +201,10 @@ int  g_pre_bars_H1   = 0;
 int  g_pre_bars_M15  = 0;
 bool g_bars_H1_check = false;
 bool g_bars_M15_check = false;
+
+// Prevent repeated cancel requests for the same pending ticket.
+ulong    g_cancel_retry_tickets[];
+datetime g_cancel_retry_at[];
 
 // ティックごとの価格情報
 struct TickContext
@@ -226,6 +257,11 @@ int OnInit()
    // initial_order=1 の場合でも、H4/H1を別々に1回だけ初回実行する。
    g_init_trend_pending = (initial_order == 1);
    g_init_entry_pending = (initial_order == 1);
+   g_ea.zone_res_chk = 0;
+   g_ea.zone_candidate_id = "0";
+   g_ea.target_candidate_at = 0;
+   ArrayResize(g_cancel_retry_tickets, 0);
+   ArrayResize(g_cancel_retry_at, 0);
 
    if(!InitializeSLTPManager())
       return INIT_FAILED;

@@ -217,6 +217,10 @@ After an H4 `market_state` reload, the EA cancels existing pending orders whose 
 
 ## 10. Changelog
 
+### 2026-06-06
+
+- Added compatibility declarations to `HIT-EA_refactor_ver5.mq5` so it compiles against the current shared headers, covering split-entry zones, Python linkage filenames, and pending-cancel retry tracking. Since `use_split_entry_zone = false` by default, the normal ver5 entry behavior remains unchanged.
+
 ### 2026-06-01
 
 - Added `debug_entry.txt` safe-stop diagnostics with the stop stage and reason so normal candidate skips can be distinguished from guarded failure fallbacks.
